@@ -17,8 +17,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 
-from chaos import (ai, attention, auth, crypto, db, demo, entitlements, memory,
-                   pipeline, ratelimit, scan as scan_mod, score as score_mod, website)
+from chaos import (ai, attention, auth, brief as brief_mod, crypto, db, demo,
+                   entitlements, memory, pipeline, ratelimit, scan as scan_mod,
+                   score as score_mod, website)
 from chaos.brand import BRAND
 from chaos.detect import rules
 from chaos.ingest import imap_source
@@ -396,6 +397,17 @@ def score(org_id: int, user=Depends(current_user)):
             "methodology": score_mod.METHODOLOGY,
             "live": score_mod.compute(org_id,
                                       website_result=scan_mod._latest_website_result(org_id))}
+
+
+@app.get("/api/orgs/{org_id}/brief")
+def morning_brief(org_id: int, format: str = "json", user=Depends(current_user)):
+    """The Morning Brief — assembled from counted facts, not written by a model."""
+    require_org(org_id, user)
+    b = brief_mod.build(org_id)
+    db.track("brief_viewed", org_id=org_id, user_id=user["id"])
+    if format == "text":
+        return Response(brief_mod.render_text(b), media_type="text/plain")
+    return {"brief": b, "text": brief_mod.render_text(b)}
 
 
 # ---------------------------------------------------------------- findings
