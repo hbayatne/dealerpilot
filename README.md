@@ -87,7 +87,7 @@ python3 tools/accuracy.py               # labelled corpus: precision & recall
 python3 tools/adversarial.py            # the patterns that break naive detectors
 ```
 
-Current: **71 tests green · 100% precision and recall on the labelled corpus ·
+Current: **79 tests green · 100% precision and recall on the labelled corpus ·
 27/27 adversarial cases.**
 
 ## Environment

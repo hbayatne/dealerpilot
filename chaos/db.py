@@ -305,6 +305,8 @@ def init():
         attention REAL DEFAULT 0,
         entity_id INTEGER,
         owner TEXT,
+        assigned_to INTEGER,
+        assigned_at TEXT,
         source_systems TEXT DEFAULT '[]',
         recommended_action TEXT,
         ai_actionable INTEGER DEFAULT 0,
@@ -1237,7 +1239,8 @@ def evidence_for(org_id, finding_id):
         return [dict(r) for r in rows]
 
 
-def findings(org_id, status=None, category=None, limit=200, offset=0, open_only=True):
+def findings(org_id, status=None, category=None, limit=200, offset=0, open_only=True,
+             assigned_to=None):
     q = "SELECT * FROM findings WHERE org_id=?"
     params = [org_id]
     if status:
@@ -1248,6 +1251,9 @@ def findings(org_id, status=None, category=None, limit=200, offset=0, open_only=
     if category:
         q += " AND category=?"
         params.append(category)
+    if assigned_to is not None:
+        q += " AND assigned_to=?"
+        params.append(assigned_to)
     q += " ORDER BY attention DESC, id DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     with _conn() as c:
@@ -1258,6 +1264,43 @@ def get_finding(org_id, fid):
     with _conn() as c:
         r = c.execute("SELECT * FROM findings WHERE org_id=? AND id=?", (org_id, fid)).fetchone()
         return _row_to_finding(r) if r else None
+
+
+def assign_finding(org_id, fid, user_id):
+    """Hand a finding to a person. `user_id` of None un-assigns."""
+    with _conn() as c:
+        c.execute("""UPDATE findings SET assigned_to=?, assigned_at=?, updated_at=?
+                     WHERE org_id=? AND id=?""",
+                  (user_id, now() if user_id else None, now(), org_id, fid))
+
+
+def workload(org_id):
+    """Open findings per assignee, by category.
+
+    Deliberately framed around work, not people: the useful question is "twelve
+    client commitments are unresolved", not "Fernando is bad at his job". The
+    same data answers both, and only one of them is a product worth selling.
+    """
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT f.assigned_to, u.email, u.name, f.category, COUNT(*) n,
+                      SUM(COALESCE(f.impact_cents,0)) cents
+               FROM findings f LEFT JOIN users u ON u.id = f.assigned_to
+               WHERE f.org_id=? AND f.status NOT IN
+                     ('dismissed','false_positive','resolved')
+               GROUP BY f.assigned_to, u.email, u.name, f.category""",
+            (org_id,)).fetchall()
+    out = {}
+    for r in rows:
+        key = r["assigned_to"] or 0
+        entry = out.setdefault(key, {
+            "user_id": r["assigned_to"],
+            "label": (r["name"] or r["email"] or "Unassigned"),
+            "total": 0, "impact_cents": 0, "by_category": {}})
+        entry["total"] += r["n"]
+        entry["impact_cents"] += r["cents"] or 0
+        entry["by_category"][r["category"]] = r["n"]
+    return sorted(out.values(), key=lambda d: -d["total"])
 
 
 def set_finding_status(org_id, fid, status, resolution=None):
