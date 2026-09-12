@@ -243,7 +243,8 @@ function renderNav(){
   if(!State.org){ $('#nav').classList.add('hide'); return; }
   $('#nav').classList.remove('hide');
   const tabs=[['home',State.brand.console_name||'Control Center'],['feed',State.brand.feed_name||'Feed'],
-              ['commitments','Commitments'],['memory','Memory'],['connect','Connections'],['trust','Trust']];
+              ['commitments','Commitments'],['inventory','Inventory'],['memory','Memory'],
+              ['connect','Connections'],['trust','Trust']];
   $('#nav').innerHTML = tabs.map(([k,l])=>
     `<button class="${State.tab===k?'on':''}" onclick="go('${k}')">${esc(l)}</button>`).join('');
 }
@@ -369,8 +370,11 @@ function renderOnboard(){
            "Real estate","Insurance","Construction","Professional services","Other"]
           .map(x=>`<option>${x}</option>`).join('')}
       </select></label>
-      <div class="row"><button class="primary">Continue</button>
-      <button type="button" class="ghost" onclick="makeDemo()">Or explore with sample data</button></div>
+      <div class="row"><button class="primary">Continue</button></div>
+      <div class="row" style="margin-top:4px">
+        <button type="button" class="ghost" onclick="makeDemo()">Explore with sample data</button>
+        <button type="button" class="ghost" onclick="makeDealerDemo()">Sample dealership (with inventory)</button>
+      </div>
     </form>
     <div id="onbErr"></div>
   </div>`;
@@ -398,6 +402,7 @@ function render(){
   if(State.tab==='home') return renderHome(r);
   if(State.tab==='feed') return renderFeed(r);
   if(State.tab==='commitments') return renderCommitments();
+  if(State.tab==='inventory') return renderInventory();
   if(State.tab==='memory') return renderMemory();
   if(State.tab==='connect') return renderConnect();
   if(State.tab==='trust') return renderTrust();
@@ -449,8 +454,15 @@ function renderHome(r){
     <div class="score-wrap" style="margin-top:22px">
       <div>
         <div class="tiny muted" style="text-transform:uppercase;letter-spacing:.06em">${esc(State.brand.score_name)}</div>
-        <div class="score-num">${s?s.score:'—'}</div>
-        <div class="small" style="font-weight:600">${s?esc(bandLabel(band)):'Run a scan to see your score'}</div>
+        <div class="score-num" ${s&&s.coverage&&s.coverage.provisional?'style="opacity:.6"':''}>${s?s.score:'—'}</div>
+        <div class="small" style="font-weight:600">${
+          !s ? 'Run a scan to see your score'
+          : (s.coverage&&s.coverage.provisional)
+            ? 'Provisional'
+            : esc(bandLabel(band))}</div>
+        ${s&&s.coverage&&s.coverage.provisional?`<div class="tiny muted" style="max-width:15ch;margin-top:6px">
+          Based on ${s.coverage.analyzed_count} of ${s.coverage.total_count} dimensions —
+          too little of the business to call yet.</div>`:''}
       </div>
       <div style="flex:1;min-width:220px">
         ${analyzed.map(([k,d])=>`
@@ -490,6 +502,16 @@ function renderHome(r){
     ${sum.total>r.today.length?`<button class="ghost" onclick="go('feed')">See all ${sum.total} findings →</button>`:''}
   </div>
 
+  ${r.inventory && r.inventory.active?`<div class="card">
+    <h2>The lot</h2>
+    <div class="row small muted">
+      <span><strong style="color:var(--ink)">${r.inventory.active}</strong> active units</span>
+      ${r.inventory.total_cost_cents?`<span><strong style="color:var(--ink)">${money(r.inventory.total_cost_cents)}</strong> of cost carried</span>`:''}
+      <span><strong style="color:var(--ink)">${r.inventory.aged_90}</strong> aged 90+ days</span>
+      ${r.inventory.no_cost?`<span class="muted">${r.inventory.no_cost} without a cost in the export</span>`:''}
+    </div>
+    <button class="ghost" style="margin-top:8px" onclick="go('inventory')">See the lot →</button>
+  </div>`:''}
   <div class="card">
     <h2>Business memory</h2>
     <div class="row small muted">
@@ -703,6 +725,119 @@ async function renderCommitments(){
   </div>`;
 }
 
+async function renderInventory(){
+  let d={vehicles:[],stats:{}};
+  try{ d=await api(`/api/orgs/${State.org.id}/inventory`); }catch(e){}
+  const st=d.stats||{}, vs=d.vehicles||[];
+  $('#main').innerHTML=`
+  <div class="card">
+    <h1>Inventory</h1>
+    <p class="muted small">Loaded from your DealerCenter <strong>Active Inventory</strong> export.
+      Cost is what turns this from a list of cars into a picture of your money — we read
+      <code>VehicleCost</code> and add <code>ReconCost</code> when it's there.</p>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" onclick="showUpload()">Upload DealerCenter export</button>
+      ${vs.length?`<span class="small muted">${vs.length} units loaded</span>`:''}
+    </div>
+    <div id="uploadBox"></div>
+  </div>
+  ${vs.length?`
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
+    <div class="stat"><span class="n">${st.active||0}</span><span class="l">Active units</span></div>
+    <div class="stat"><span class="n">${st.total_cost_cents?money(st.total_cost_cents):'—'}</span>
+      <span class="l">Cost on the lot</span>
+      ${st.no_cost?`<div class="tiny muted" style="margin-top:4px">${st.no_cost} without a cost — this is a floor</div>`:''}</div>
+    <div class="stat"><span class="n">${st.aged_90||0}</span><span class="l">Aged 90+ days</span>
+      ${st.aged_capital_cents?`<div class="tiny muted" style="margin-top:4px">${money(st.aged_capital_cents)} tied up</div>`:''}</div>
+    <div class="stat"><span class="n">${st.unsellable||0}</span><span class="l">Not shoppable</span>
+      <div class="tiny muted" style="margin-top:4px">no price or no photos</div></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>The lot</h2>
+    <table><thead><tr><th>Unit</th><th>Days</th><th>Price</th><th>Cost</th><th>Margin</th><th>Status</th></tr></thead>
+    <tbody>${vs.map(v=>{
+      const name=[v.year,v.make,v.model].filter(Boolean).join(' ')||v.vin||'—';
+      const aged=(v.days_in_stock||0)>=90;
+      const neg=v.margin_pct!==null&&v.margin_pct<0;
+      return `<tr>
+        <td><strong>${esc(name)}</strong>
+          <div class="tiny muted">${esc(v.stock_no||'')}${v.vin?' · '+esc(v.vin.slice(-8)):''}</div></td>
+        <td class="small ${aged?'':'muted'}" ${aged?'style="color:var(--crit);font-weight:600"':''}>${v.days_in_stock??'—'}</td>
+        <td class="small">${v.price_cents?money(v.price_cents):'<span class="muted">no price</span>'}</td>
+        <td class="small">${v.cost_cents!=null?money(v.cost_cents):'<span class="muted">not in export</span>'}</td>
+        <td class="small" ${neg?'style="color:var(--crit);font-weight:600"':''}>${v.margin_pct!==null&&v.margin_pct!==undefined?v.margin_pct+'%':'—'}</td>
+        <td class="small muted">${esc(v.status||'')}${v.photo_count?'':' · no photos'}</td>
+      </tr>`;}).join('')}</tbody></table>
+  </div>`:`<div class="card"><p class="muted">No inventory loaded yet. Upload your export above,
+    or <a href="#" onclick="makeDealerDemo();return false">see it with a sample dealership</a>.</p></div>`}`;
+}
+
+function showUpload(){
+  $('#uploadBox').innerHTML=`
+  <div class="card" style="margin-top:16px">
+    <h2>Upload your export</h2>
+    <p class="small muted">In DealerCenter: <strong>Inventory → Active Inventory → Export</strong>.
+      CSV or XML. Make sure the cost column is included — without it we can show you
+      which cars are old but not what they're costing you.</p>
+    <input type="file" accept=".csv,.txt,.tsv,.xml" onchange="pickFile(event)" style="margin-top:12px">
+    <div id="upOut"></div>
+  </div>`;
+}
+window.showUpload=showUpload;
+
+let _pendingCsv=null, _pendingName=null;
+async function pickFile(e){
+  const file=e.target.files&&e.target.files[0];
+  if(!file) return;
+  $('#upOut').innerHTML=`<div style="margin-top:12px"><span class="spin"></span> Reading ${esc(file.name)}…</div>`;
+  const text=await file.text();
+  _pendingCsv=text; _pendingName=file.name;
+  try{
+    const {preview:p}=await api(`/api/orgs/${State.org.id}/inventory/preview`,
+      {method:'POST',body:JSON.stringify({content:text,filename:file.name})});
+    const cov=p.coverage||{};
+    $('#upOut').innerHTML=`
+      <div class="${p.warnings&&p.warnings.length?'banner':'ok'}" style="margin-top:14px">
+        Found <strong>${p.vehicles}</strong> vehicles in ${esc(p.format.toUpperCase())}.
+        ${cov.with_cost} have a cost, ${cov.with_price} have a price,
+        ${cov.with_date_in_stock} have a date in stock.
+      </div>
+      ${(p.warnings||[]).map(w=>`<div class="err" style="margin-top:8px">${esc(w)}</div>`).join('')}
+      <div class="small muted" style="margin-top:12px">
+        <strong>Columns we understood:</strong>
+        ${Object.entries(p.understood||{}).map(([c,k])=>`${esc(c)} → ${esc(k)}`).join(' · ')||'none'}
+      </div>
+      ${(p.ignored||[]).length?`<div class="tiny muted" style="margin-top:6px">
+        Ignored: ${p.ignored.map(esc).join(', ')}</div>`:''}
+      <div class="row" style="margin-top:16px">
+        <button class="primary" onclick="doImport(this)">Import ${p.vehicles} vehicles</button>
+        <button class="ghost" onclick="$('#upOut').innerHTML='';">Cancel</button>
+      </div>`;
+  }catch(err){ $('#upOut').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
+}
+window.pickFile=pickFile;
+
+async function doImport(btn){
+  btn.disabled=true;
+  $('#upOut').insertAdjacentHTML('beforeend',
+    `<div id="impMsg" style="margin-top:12px"><span class="spin"></span> Importing…</div>`);
+  try{
+    const r=await api(`/api/orgs/${State.org.id}/inventory/import`,
+      {method:'POST',body:JSON.stringify({content:_pendingCsv,filename:_pendingName})});
+    $('#impMsg').innerHTML=`<div class="ok">Imported ${r.imported} vehicles
+      (${r.created} new, ${r.updated} updated). Running a scan…</div>`;
+    await api(`/api/orgs/${State.org.id}/scan`,{method:'POST'});
+    setTimeout(async()=>{ await loadReport(); go('home'); }, 2500);
+  }catch(err){ $('#impMsg').innerHTML=`<div class="err">${esc(err.message)}</div>`; }
+}
+window.doImport=doImport;
+
+async function makeDealerDemo(){
+  const r=await api('/api/demo/dealer',{method:'POST'});
+  State.orgs.push(r.org); State.tab='home'; await pickOrg(r.org.id);
+}
+window.makeDealerDemo=makeDealerDemo;
+
 async function renderMemory(){
   const [{entities},{candidates}] = await Promise.all([
     api(`/api/orgs/${State.org.id}/entities?limit=200`),
@@ -773,6 +908,8 @@ async function renderConnect(){
           <div>${a.kind==='imap'
             ? (c?`<button class="ghost" onclick="disconnectInt('imap')">Disconnect</button>`
                 :`<button class="primary" onclick="showMailbox()" ${d.secrets_ready?'':'disabled'}>Connect</button>`)
+            : a.kind==='dealercenter'
+            ? `<button class="primary" onclick="go('inventory')">${c?'Upload again':'Upload export'}</button>`
             : `<button disabled>Not yet</button>`}</div>
         </div></div>`;
     }).join('')}

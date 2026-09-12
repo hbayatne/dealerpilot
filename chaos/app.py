@@ -21,8 +21,8 @@ from chaos import (ai, attention, auth, brief as brief_mod, crypto, db, demo,
                    entitlements, memory, pipeline, ratelimit, scan as scan_mod,
                    scheduler, score as score_mod, website)
 from chaos.brand import BRAND
-from chaos.detect import rules
-from chaos.ingest import imap_source
+from chaos.detect import inventory as inventory_rules, rules
+from chaos.ingest import dealercenter, imap_source
 
 app = FastAPI(title=BRAND.name, docs_url="/api/docs", openapi_url="/api/openapi.json")
 db.init()
@@ -66,6 +66,14 @@ class MailboxIn(BaseModel):
     host: Optional[str] = None
     port: Optional[int] = None
     folders: Optional[List[str]] = None
+
+
+class InventoryIn(BaseModel):
+    # The export arrives as text rather than a multipart upload: the browser reads
+    # the file locally and posts its contents, which keeps the dependency list at
+    # four packages. A DealerCenter export is a few hundred KB of CSV.
+    content: str
+    filename: Optional[str] = None
 
 
 class FeedbackIn(BaseModel):
@@ -318,6 +326,10 @@ def _catalog(org):
          "note": "Needs Google OAuth app verification."},
         {"kind": "google_calendar", "label": "Google Calendar", "status": "planned",
          "unlocks": "Missed appointments, promised meetings, scheduling conflicts"},
+        {"kind": "dealercenter", "label": "DealerCenter inventory", "status": "available",
+         "unlocks": "Capital tied up in aged units, margin, and which aged cars "
+                    "people are still asking about",
+         "note": "Upload your Active Inventory export. Include the cost column."},
         {"kind": "quickbooks", "label": "QuickBooks Online", "status": "planned",
          "unlocks": "Aging receivables, duplicate charges, vendor price creep"},
         {"kind": "hubspot", "label": "HubSpot CRM", "status": "planned",
@@ -357,6 +369,61 @@ def connect_mailbox(org_id: int, body: MailboxIn, user=Depends(current_user)):
     db.track("integration_connected", org_id=org_id, user_id=user["id"], kind="imap")
     db.audit(org_id, user["id"], "integration.connect", "imap", body.email)
     return {"ok": True, "detail": detail}
+
+
+@app.post("/api/orgs/{org_id}/inventory/preview")
+def preview_inventory(org_id: int, body: InventoryIn, user=Depends(current_user)):
+    """Show what we understood in this export — before importing anything.
+
+    The point of this step is the cost column. A dealer should find out here that
+    we couldn't see their cost, not after a dashboard has quietly under-reported
+    their capital by half.
+    """
+    ctx = require_org(org_id, user)
+    _need(ctx, "manager")
+    try:
+        return {"preview": dealercenter.describe(body.content or "")}
+    except Exception as e:
+        raise HTTPException(400, f"That file couldn't be read: {str(e)[:160]}")
+
+
+@app.post("/api/orgs/{org_id}/inventory/import")
+def import_inventory(org_id: int, body: InventoryIn, user=Depends(current_user)):
+    """Import a DealerCenter export. Idempotent on VIN — re-uploading updates."""
+    ctx = require_org(org_id, user)
+    _need(ctx, "manager")
+    try:
+        rows = dealercenter.parse(body.content or "")
+    except Exception as e:
+        raise HTTPException(400, f"That file couldn't be read: {str(e)[:160]}")
+    if not rows:
+        raise HTTPException(400, "No vehicles were found in that file.")
+    created = updated = 0
+    for v in rows:
+        _vid, is_new = db.upsert_vehicle(org_id, v)
+        created += 1 if is_new else 0
+        updated += 0 if is_new else 1
+    db.upsert_integration(org_id, "dealercenter", label=body.filename or "inventory export",
+                          config={"last_file": body.filename,
+                                  "last_rows": len(rows)})
+    db.audit(org_id, user["id"], "inventory.import", f"org:{org_id}",
+             f"{created} new, {updated} updated from {body.filename or 'upload'}")
+    db.track("inventory_imported", org_id=org_id, user_id=user["id"], rows=len(rows))
+    return {"imported": len(rows), "created": created, "updated": updated,
+            "coverage": dealercenter.describe(body.content or "")["coverage"]}
+
+
+@app.get("/api/orgs/{org_id}/inventory")
+def inventory(org_id: int, status: Optional[str] = None, user=Depends(current_user)):
+    require_org(org_id, user)
+    rows = db.vehicles(org_id, status=status)
+    import datetime
+    today = datetime.date.today()
+    for v in rows:
+        v["days_in_stock"] = inventory_rules._days_in_stock(v, today)
+        v["margin_pct"] = inventory_rules.margin_pct(v)
+    return {"vehicles": rows,
+            "stats": score_mod._inventory_measurements(org_id, db.now())}
 
 
 @app.delete("/api/orgs/{org_id}/integrations/{kind}")
@@ -664,6 +731,30 @@ def delete_data(org_id: int, user=Depends(current_user)):
 
 
 # ---------------------------------------------------------------- demo
+@app.post("/api/demo/dealer")
+def create_dealer_demo(user=Depends(current_user)):
+    """A sample dealership: a DealerCenter export plus the mailbox that goes with
+    it, so the cross-system findings have both halves to work from."""
+    import datetime
+    from chaos import demo_dealer
+    oid = db.create_org(demo_dealer.ORG["name"], demo_dealer.ORG["website"],
+                        demo_dealer.ORG["industry"], user_id=user["id"],
+                        domains=demo_dealer.ORG["domains"])
+    org = db.get_org(oid)
+    db.upsert_integration(oid, "imap", label="demo mailbox (sample data)",
+                          config={"sample_data": True})
+    db.upsert_integration(oid, "dealercenter", label="DealerCenter export (sample data)",
+                          config={"sample_data": True})
+    now = datetime.datetime.utcnow().replace(microsecond=0)
+    csv_text, msgs, _ = demo_dealer.build(now)
+    for v in dealercenter.parse(csv_text):
+        db.upsert_vehicle(oid, v)
+    pipeline.ingest(org, msgs)
+    scan_mod.analyze(org, now_iso=now.isoformat(timespec="seconds"))
+    db.track("demo_dealer_created", org_id=oid, user_id=user["id"])
+    return {"org": db.get_org(oid), "banner": demo_dealer.DEMO_BANNER}
+
+
 @app.post("/api/demo")
 def create_demo(user=Depends(current_user)):
     """A fully populated demo organization, clearly labelled as demo data."""

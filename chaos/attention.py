@@ -132,9 +132,11 @@ def summarize(org_id, ranked=None):
     money_at_risk = sum(f.get("impact_cents") or 0 for f in ranked
                         if f.get("category") == "revenue")
     known_value = [f for f in ranked if f.get("impact_cents")]
+    # Counted the same way the "what needs you today" list is built, so the
+    # headline number can never disagree with the list beneath it.
     return {
         "total": len(ranked),
-        "needs_owner": len([f for f in ranked if f["attention"] >= OWNER_THRESHOLD]),
+        "needs_owner": len(today(org_id, ranked)),
         "ai_actionable": len([f for f in ranked if f.get("ai_actionable")]),
         "by_category": _counts(ranked, "category"),
         "by_severity": _counts(ranked, "severity"),

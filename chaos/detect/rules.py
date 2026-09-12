@@ -468,6 +468,9 @@ ORG_RULES = [undelivered_email]
 # several. The owner should see "Pat Nguyen is upset and nobody has replied",
 # not four rows about the same customer. Higher number wins the thread.
 _PRIORITY = {
+    # A matched buyer on a unit we still own outranks everything: it says the
+    # same thing "nobody replied" says, plus which car and what it is worth.
+    "unanswered_lead_on_unit": 7,
     "undelivered_email": 6,          # nothing else on the thread is true if this is
     "unresolved_complaint": 5,
     "overdue_commitment": 4,
@@ -546,6 +549,7 @@ def consolidate(results):
 
 
 _ALSO = {
+    "unanswered_lead_on_unit": "they asked about a specific unit still in stock",
     "undelivered_email": "an email to them bounced",
     "unresolved_complaint": "the customer sounds unhappy",
     "overdue_commitment": "a commitment we made is past due",
@@ -639,4 +643,7 @@ def run(org, now_iso=None, limit=2000):
                 out.append((f, ev))
         except Exception:
             continue
+    # Consolidated here so `run` is correct on its own. The orchestrator
+    # consolidates again across every detector, which is a no-op for anything
+    # already reduced to one finding per thread.
     return consolidate(out)

@@ -12,7 +12,7 @@ software is broken.
 import secrets
 
 from chaos import attention, crypto, db, entitlements, pipeline, score as score_mod, website
-from chaos.detect import rules
+from chaos.detect import crosssystem, inventory as inventory_rules, rules
 from chaos.ingest import imap_source
 
 
@@ -90,7 +90,13 @@ def analyze(org, now_iso=None):
     commit_counts = rules.record_commitments(org, now_iso)
 
     created = updated = 0
-    for f, ev in rules.run(org, now_iso=now_iso):
+    # Mailbox findings, then the lot, then the two systems against each other.
+    # Cross-system runs last because it needs both sides already stored.
+    detected = rules.consolidate(
+        rules.run(org, now_iso=now_iso)
+        + inventory_rules.run(org, now_iso=now_iso)
+        + crosssystem.run(org, now_iso=now_iso))
+    for f, ev in detected:
         f.pop("_conversation_id", None)
         key = f.pop("dedupe_key")
         fid, is_new = db.upsert_finding(org_id, key, **f)
@@ -107,6 +113,7 @@ def analyze(org, now_iso=None):
 
     return {"commitments": commit_counts, "findings_new": created,
             "findings_updated": updated, "findings_total": len(ranked),
+            "vehicles": db.vehicle_count(org_id),
             "score": result["score"], "band": result["band_label"],
             "coverage": result["coverage"]}
 
@@ -169,6 +176,7 @@ def report(org_id, limit=50):
     shown = ranked[:visible_cap] if visible_cap else ranked[:limit]
 
     commitments = db.commitments(org_id, limit=200)
+    inv_stats = score_mod._inventory_measurements(org_id, db.now())
     return {
         "org": {"id": org["id"], "name": org["name"], "website": org.get("website"),
                 "industry": org.get("industry"), "domains": org.get("domains")},
@@ -186,6 +194,7 @@ def report(org_id, limit=50):
         },
         "integrations": db.integrations(org_id),
         "plan": entitlements.describe(org),
+        "inventory": inv_stats,
         "memory": {
             "people": len(db.entities(org_id, kind="person", limit=5000)),
             "companies": len(db.entities(org_id, kind="company", limit=5000)),
