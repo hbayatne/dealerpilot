@@ -369,7 +369,11 @@ function renderHome(r){
   </div>
 
   <div class="card" style="margin-top:14px">
-    <h2>What needs you today</h2>
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">What needs you today</h2>
+      <button class="ghost" onclick="showBrief()">Read the brief</button>
+    </div>
+    <div id="briefOut"></div>
     ${r.today.length? r.today.map(f=>findingCard(f)).join('')
       : '<p class="muted small">Nothing needs your personal attention right now.</p>'}
     ${sum.total>r.today.length?`<button class="ghost" onclick="go('feed')">See all ${sum.total} findings →</button>`:''}
@@ -519,6 +523,19 @@ async function runScan(){
   },900);
 }
 window.runScan=runScan;
+
+async function showBrief(){
+  const out=$('#briefOut');
+  if(out.dataset.open==='1'){ out.innerHTML=''; out.dataset.open='0'; return; }
+  out.innerHTML=`<div style="margin-top:10px"><span class="spin"></span> Writing…</div>`;
+  const r=await api(`/api/orgs/${State.org.id}/brief`);
+  out.dataset.open='1';
+  out.innerHTML=`<pre style="margin-top:12px;white-space:pre-wrap;font:inherit;
+    background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:15px">${esc(r.text)}</pre>
+    <p class="tiny muted">Assembled from the same counted facts as the dashboard. No
+    model wrote this, so it cannot claim anything the evidence doesn't support.</p>`;
+}
+window.showBrief=showBrief;
 
 async function renderCommitments(){
   const {commitments}=await api(`/api/orgs/${State.org.id}/commitments`);
