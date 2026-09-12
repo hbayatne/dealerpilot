@@ -36,11 +36,24 @@ input,select,textarea{font:inherit;padding:10px 12px;border:1px solid var(--line
 input:focus,textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
 .wrap{max-width:1060px;margin:0 auto;padding:0 18px}
 header.top{border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:9}
-header.top .wrap{display:flex;align-items:center;gap:16px;padding-block:13px;flex-wrap:wrap}
+header.top .wrap{display:flex;align-items:center;gap:12px;padding-block:13px;flex-wrap:wrap}
+/* The nav is the flexible element; the identity block stays on the first row.
+   Below 1080px the email is redundant next to Sign out, so it steps aside
+   rather than pushing the whole header onto a second line. */
+header.top nav{flex:1 1 auto;min-width:0;justify-content:flex-end}
+/* Email and Sign out travel together — separately they wrap apart and the
+   header silently becomes two rows. */
+.ident{display:flex;align-items:center;gap:8px;flex:0 0 auto;white-space:nowrap}
+/* The signed-in email is the least useful thing in this bar — the business
+   name is what a multi-location owner needs. It steps aside well before the
+   header would wrap. */
+@media(max-width:1400px){#who{display:none}}
+#orgPick{max-width:230px}
+@media(max-width:720px){header.top nav{justify-content:flex-start;order:3;flex-basis:100%}}
 .logo{font-weight:700;letter-spacing:-.02em;font-size:16px;display:flex;align-items:center;gap:8px}
 .logo .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
-nav{display:flex;gap:3px;flex-wrap:wrap;margin-left:auto}
-nav button{border:none;background:transparent;color:var(--muted);padding:7px 11px;font-size:14px}
+nav{display:flex;gap:2px;flex-wrap:wrap;margin-left:auto}
+nav button{border:none;background:transparent;color:var(--muted);padding:7px 10px;font-size:13.5px;white-space:nowrap}
 nav button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
 .card+.card{margin-top:14px}
@@ -107,9 +120,12 @@ footer{padding:36px 0;color:var(--muted);font-size:13px;text-align:center}
 <body>
 <header class="top"><div class="wrap">
   <div class="logo"><span class="dot"></span><span id="brandName">Chaos Control</span></div>
+  <select id="orgPick" class="hide" style="width:auto;padding:6px 9px;font-size:13px"></select>
   <nav id="nav" class="hide"></nav>
-  <span id="who" class="small muted"></span>
-  <button id="signout" class="ghost hide">Sign out</button>
+  <div class="ident">
+    <span id="who" class="small muted"></span>
+    <button id="signout" class="ghost hide">Sign out</button>
+  </div>
 </div></header>
 
 <main class="wrap" id="main"></main>
@@ -155,10 +171,37 @@ async function boot(){
     $('#who').textContent = me.user.email;
     $('#signout').classList.remove('hide');
     $('#signout').onclick = async()=>{ await api('/api/logout',{method:'POST'}); location.reload(); };
-    if(State.org){ await loadReport(); go('home'); } else { renderOnboard(); }
+    if(State.org){ await pickOrg(rememberedOrgId() || State.org.id); } else { renderOnboard(); }
   }catch(e){ renderLanding(); }
 }
 function go(tab){ State.tab=tab; renderNav(); render(); window.scrollTo(0,0); }
+
+/* A user can own several businesses — a second location, a demo, another
+   company. Without a switcher they are silently pinned to whichever came
+   first, which looks exactly like the product finding nothing. */
+function rememberedOrgId(){
+  try{ return parseInt(localStorage.getItem('chaos_org')||'')||null; }catch(e){ return null; }
+}
+function rememberOrg(id){ try{ localStorage.setItem('chaos_org',id); }catch(e){} }
+
+async function pickOrg(id){
+  State.org = State.orgs.find(o=>o.id===Number(id)) || State.orgs[0];
+  rememberOrg(State.org.id);
+  renderOrgPicker();
+  await loadReport();
+  go(State.tab || 'home');
+}
+window.pickOrg=pickOrg;
+
+function renderOrgPicker(){
+  const el=$('#orgPick');
+  if(!State.orgs.length){ el.classList.add('hide'); return; }
+  el.classList.toggle('hide', State.orgs.length<2);
+  el.innerHTML = State.orgs.map(o=>
+    `<option value="${o.id}" ${State.org&&o.id===State.org.id?'selected':''}>${esc(o.name)}</option>`
+  ).join('');
+  el.onchange = e => pickOrg(e.target.value);
+}
 
 function renderNav(){
   if(!State.org){ $('#nav').classList.add('hide'); return; }
@@ -292,14 +335,14 @@ async function createOrg(e){
   try{
     const r=await api('/api/orgs',{method:'POST',body:JSON.stringify({
       name:f.name.value, website:f.website.value, industry:f.industry.value})});
-    State.org=r.org; State.orgs.push(r.org); await loadReport(); go('connect');
+    State.orgs.push(r.org); State.tab='connect'; await pickOrg(r.org.id);
   }catch(err){ $('#onbErr').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
 }
 window.createOrg=createOrg;
 async function makeDemo(){
   $('#onbErr').innerHTML=`<div class="card" style="margin-top:12px"><span class="spin"></span> Building a sample business…</div>`;
   const r=await api('/api/demo',{method:'POST'});
-  State.org=r.org; State.orgs.push(r.org); await loadReport(); go('home');
+  State.orgs.push(r.org); State.tab='home'; await pickOrg(r.org.id);
 }
 window.makeDemo=makeDemo;
 
@@ -323,6 +366,29 @@ function greeting(){
 function renderHome(r){
   if(!r) return $('#main').innerHTML=`<div class="card"><span class="spin"></span> Loading…</div>`;
   const s=r.score, sum=r.summary, demo=(r.org.name||"").includes("(demo)");
+  /* Nothing connected yet. "Nothing needs your attention" would be a lie by
+     omission here — we haven't looked at anything. Say so, and say what to do. */
+  if(!r.memory.messages && !(r.integrations||[]).length){
+    return $('#main').innerHTML=`
+    <div class="card">
+      <h1>${greeting()}</h1>
+      <p class="muted small">${esc(r.org.name)}</p>
+      <div class="banner" style="margin-top:16px;background:var(--accent-soft);color:var(--accent)">
+        We haven't looked at anything yet — so we can't tell you what you're missing.</div>
+      <h2 style="margin-top:18px">Connect your email to get your first findings</h2>
+      <p class="small muted">Read-only, and it takes about a minute with an app password.
+        Most of what falls through the cracks in a business falls through it in email:
+        customers waiting on a reply, promises nobody kept, quotes nobody chased.</p>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" onclick="go('connect')">Connect a mailbox</button>
+        <button onclick="makeDemo()">See it with sample data first</button>
+      </div>
+    </div>
+    ${r.org.website?`<div class="card"><h2>Meanwhile, your website</h2>
+      <p class="small muted">We can check ${esc(r.org.website)} right now without connecting anything.</p>
+      <button onclick="runScan()" id="scanBtn">Scan my website</button>
+      <div id="scanProgress"></div></div>`:''}`;
+  }
   const band=s?s.band:'unknown';
   const dims=s?Object.entries(s.dimensions||{}):[];
   const analyzed=dims.filter(([,d])=>d.analyzed);
