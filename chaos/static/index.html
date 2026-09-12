@@ -158,12 +158,48 @@ function ago(ts){
 }
 
 /* ------------------------------------------------------------------ boot */
+/* A shared scan report. Opens without an account and shows only the public
+   website scan — findings from a connected mailbox are never shareable, because
+   a link that leaks a customer's unanswered complaints is a breach, not a
+   growth loop. */
+function sharedToken(){
+  const m = location.pathname.match(/^\/report\/([\w-]+)$/);
+  return m ? m[1] : null;
+}
+
+async function renderShared(token){
+  $('#nav').classList.add('hide');
+  $('#main').innerHTML = `<div class="card"><span class="spin"></span> Loading report…</div>`;
+  try{
+    const {scan} = await api('/api/scan/shared/'+encodeURIComponent(token));
+    const b = State.brand;
+    $('#main').innerHTML = `
+      <section class="hero" style="padding:34px 0 18px">
+        <h1 style="font-size:30px;max-width:22ch">${esc(b.scan_name||'Scan')} report</h1>
+        <p style="font-size:15px">${esc(scan.target)} · ${esc(when(scan.created_at))}</p>
+      </section>
+      <div id="sharedOut"></div>
+      <div class="card">
+        <h2>This is only what we can see from outside</h2>
+        <p class="small muted">${esc(b.subline||'')}</p>
+        <a href="/"><button class="primary">${esc(b.cta||'Run a free scan')}</button></a>
+      </div>`;
+    renderWebsiteResult(scan.result, '#sharedOut', false);
+  }catch(e){
+    $('#main').innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div>
+      <p class="small muted" style="margin-top:12px">This report link may have expired or
+      been unshared. <a href="/">Run your own scan</a>.</p></div>`;
+  }
+}
+
 async function boot(){
   const h = await api('/api/health');
   State.brand = h.brand; State.health = h;
   $('#brandName').textContent = h.brand.short;
   document.title = h.brand.name;
   $('#foot').innerHTML = `${esc(h.brand.name)} · <span class="muted">${esc(h.brand.tagline)}</span>`;
+  const shared = sharedToken();
+  if(shared){ return renderShared(shared); }
   try{
     const me = await api('/api/me');
     State.user = me.user; State.orgs = me.orgs;
@@ -273,6 +309,15 @@ async function runPublicScan(e){
   try{
     const r = await api('/api/scan/website',{method:'POST',body:JSON.stringify({url})});
     State.scanResult=r.result; renderWebsiteResult(r.result,'#scanOut',true);
+    if(r.result.share_token){
+      const link = location.origin + '/report/' + r.result.share_token;
+      $('#scanOut').insertAdjacentHTML('beforeend', `<div class="card">
+        <h2>Share this report</h2>
+        <p class="small muted">A read-only page of these public website findings. It contains
+          nothing from any connected system.</p>
+        <input readonly value="${esc(link)}" onclick="this.select()" style="margin-top:8px">
+      </div>`);
+    }
   }catch(err){ $('#scanOut').innerHTML=`<div class="card"><div class="err">${esc(err.message)}</div></div>`; }
 }
 window.runPublicScan=runPublicScan;

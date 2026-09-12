@@ -192,3 +192,37 @@ class PromptInjection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedReports(unittest.TestCase):
+    """A shared scan link is public. It must never carry anything from a
+    connected mailbox — a link that leaks a customer's unanswered complaints is
+    a breach, not a growth loop."""
+
+    def setUp(self):
+        os.environ["CHAOS_DB"] = os.path.join(tempfile.mkdtemp(), "share.db")
+        import importlib
+        importlib.reload(db)
+        db.init()
+
+    def test_only_explicitly_shared_scans_resolve(self):
+        token = "tok-not-shared"
+        sid = db.create_scan(None, "website", "example.test", share_token=token)
+        db.update_scan(sid, status="done", result={"issues": []})   # shared stays 0
+        self.assertIsNone(db.scan_by_token(token))
+
+        db.update_scan(sid, shared=1)
+        self.assertIsNotNone(db.scan_by_token(token))
+
+    def test_a_full_scan_is_never_served_over_a_share_link(self):
+        """Full scans carry findings derived from a mailbox."""
+        token = "tok-full"
+        sid = db.create_scan(1, "full", "example.test", share_token=token)
+        db.update_scan(sid, status="done", shared=1,
+                       result={"steps": {"analysis": {"findings_total": 9}}})
+        c = TestClient(app)
+        self.assertEqual(c.get(f"/api/scan/shared/{token}").status_code, 404)
+
+    def test_unknown_token_is_a_404(self):
+        c = TestClient(app)
+        self.assertEqual(c.get("/api/scan/shared/no-such-token").status_code, 404)
