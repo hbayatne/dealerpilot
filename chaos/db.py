@@ -242,6 +242,7 @@ def init():
         body TEXT,                     -- retention-governed, see privacy.py
         snippet TEXT,
         automated TEXT,                -- why we think it is machine-generated
+        auto_kind TEXT,                -- bounce | out_of_office | bulk
         attachments INTEGER DEFAULT 0,
         thread_key TEXT,
         entity_id INTEGER,
@@ -888,12 +889,13 @@ def add_message(org_id, **m):
         mid = c.insert_id(
             """INSERT INTO messages (org_id,conversation_id,source,source_id,direction,
                    from_addr,from_name,to_addrs,sent_at,subject,body,snippet,
-                   automated,attachments,thread_key,entity_id,actor_entity_id,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   automated,auto_kind,attachments,thread_key,entity_id,
+                   actor_entity_id,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (org_id, m.get("conversation_id"), m.get("source", "email"), m.get("source_id"),
              m.get("direction"), m.get("from_addr"), m.get("from_name"),
              json.dumps(m.get("to_addrs") or []), m.get("sent_at"), m.get("subject"),
-             m.get("body"), m.get("snippet"), m.get("automated"),
+             m.get("body"), m.get("snippet"), m.get("automated"), m.get("auto_kind"),
              int(m.get("attachments") or 0), m.get("thread_key"), m.get("entity_id"),
              m.get("actor_entity_id"), now()))
         c.commit()
@@ -938,6 +940,22 @@ def messages_in(org_id, conversation_id):
 def get_message(org_id, mid):
     with _conn() as c:
         r = c.execute("SELECT * FROM messages WHERE org_id=? AND id=?", (org_id, mid)).fetchone()
+        return _row_to_message(r) if r else None
+
+
+def last_outbound_to(org_id, entity_id, before=None, after=None):
+    """The most recent outbound message to one contact, bounded in time."""
+    q = """SELECT * FROM messages WHERE org_id=? AND entity_id=? AND direction='out'"""
+    params = [org_id, entity_id]
+    if before:
+        q += " AND sent_at <= ?"
+        params.append(before)
+    if after:
+        q += " AND sent_at > ?"
+        params.append(after)
+    q += " ORDER BY sent_at DESC LIMIT 1"
+    with _conn() as c:
+        r = c.execute(q, params).fetchone()
         return _row_to_message(r) if r else None
 
 
