@@ -17,6 +17,10 @@ from chaos.detect import base, signals as S
 
 METHODOLOGY = "chaos-score-v1"
 
+# Below this many analyzed dimensions, an overall score describes too little of
+# the business to be stated as fact.
+MIN_DIMENSIONS_FOR_SCORE = 3
+
 BANDS = [(20, "excellent", "Excellent control"),
          (40, "controlled", "Controlled"),
          (60, "moderate", "Moderate chaos"),
@@ -31,6 +35,7 @@ DIMENSIONS = {
     "revenue":              {"label": "Revenue at risk", "needs": ["email"], "weight": 1.3},
     "client_problems":      {"label": "Client problems", "needs": ["email"], "weight": 1.1},
     "digital":              {"label": "Digital presence", "needs": ["website"], "weight": 0.7},
+    "inventory":            {"label": "Inventory & capital", "needs": ["inventory"], "weight": 1.3},
     "collections":          {"label": "Collections", "needs": ["accounting"], "weight": 1.2},
     "financial":            {"label": "Financial leakage", "needs": ["accounting"], "weight": 1.0},
     "reputation":           {"label": "Reputation", "needs": ["reviews"], "weight": 0.8},
@@ -48,6 +53,7 @@ CAPABILITY = {
     "calendar": {"google_calendar", "outlook_calendar"},
     "ads": {"google_ads", "meta_ads"},
     "crm": {"hubspot", "salesforce", "gohighlevel", "pipedrive"},
+    "inventory": {"dealercenter", "dms", "vauto", "frazer"},
 }
 
 
@@ -135,6 +141,39 @@ def measure(org_id, now_iso=None):
         "money_at_risk_cents": money_at_risk,
         "messages": db.message_count(org_id),
         "contacts": len(db.entities(org_id, kind="person", role="contact", limit=5000)),
+        "inventory": _inventory_measurements(org_id, now_iso),
+    }
+
+
+def _inventory_measurements(org_id, now_iso):
+    """Counted facts about the lot. Empty when no DMS export has been loaded."""
+    import datetime
+    from chaos.detect import inventory as inv_rules
+    rows = db.vehicles(org_id)
+    if not rows:
+        return {}
+    try:
+        today = datetime.date.fromisoformat(now_iso[:10])
+    except Exception:
+        today = datetime.date.today()
+    active = [v for v in rows if v.get("status") != "sold"]
+    aged = [v for v in active
+            if (inv_rules._days_in_stock(v, today) or 0) >= inv_rules.AGED_CRITICAL_DAYS]
+    frontline = [v for v in active if v.get("status") == "frontline"]
+    unsellable = [v for v in frontline if not v.get("price_cents") or not v.get("photo_count")]
+    negative = [v for v in active
+                if (inv_rules.margin_pct(v) or 0) < 0 and inv_rules.margin_pct(v) is not None]
+    return {
+        "total": len(rows),
+        "active": len(active),
+        "aged_90": len(aged),
+        "aged_capital_cents": sum(v["cost_cents"] for v in aged
+                                  if v.get("cost_cents") is not None),
+        "unsellable": len(unsellable),
+        "negative_margin": len(negative),
+        "no_cost": len([v for v in active if v.get("cost_cents") is None]),
+        "total_cost_cents": sum(v["cost_cents"] for v in active
+                                if v.get("cost_cents") is not None),
     }
 
 
@@ -211,6 +250,32 @@ def _dimension_scores(m, website_result=None):
                 _factor("Contacts with an unresolved problem", problems, m["contacts"], None),
             ]}
 
+    # --- inventory: how much capital is stuck, and how much of the lot is
+    # actually shoppable. Every input is counted from the DMS export.
+    inv = m.get("inventory") or {}
+    if inv.get("active"):
+        active = inv["active"]
+        aged_rate = _pct(inv["aged_90"], active)
+        unsellable_rate = _pct(inv["unsellable"], active)
+        neg = _pct(inv["negative_margin"], active)
+        score = _shape(min(1.0, aged_rate * 1.4 + unsellable_rate * 0.8 + neg * 2.0))
+        factors = [
+            _factor("Units in stock over 90 days", inv["aged_90"], active,
+                    f"{aged_rate:.0%}"),
+            _factor("Frontline units with no price or photos", inv["unsellable"],
+                    active, f"{unsellable_rate:.0%}"),
+            _factor("Units priced below cost", inv["negative_margin"], active, None),
+        ]
+        if inv.get("aged_capital_cents"):
+            factors.append({"label": "Cost carried on aged units",
+                            "value": base.money(inv["aged_capital_cents"]),
+                            "detail": "Acquisition and recon cost as exported."})
+        if inv.get("no_cost"):
+            factors.append({"label": "Units with no cost in the export",
+                            "value": f"{inv['no_cost']} of {active}",
+                            "detail": "Money figures for this lot are a floor, not a total."})
+        out["inventory"] = {"score": score, "factors": factors}
+
     # --- digital presence, from the website scan
     if website_result and website_result.get("issues") is not None:
         issues = website_result["issues"]
@@ -259,7 +324,15 @@ def compute(org_id, now_iso=None, website_result=None, extra_capabilities=None):
 
     score = int(round(total_v / total_w)) if total_w else 0
     key, label = band(score)
+    # With only one dimension visible we have seen a fraction of the business, and
+    # calling that "Critical chaos" is a claim about the whole company we cannot
+    # support. Below the floor the number is reported as provisional and the band
+    # is withheld — the dimension score is still shown, because that part is real.
+    provisional = len(analyzed) < MIN_DIMENSIONS_FOR_SCORE
+    if provisional:
+        label = f"Provisional — {len(analyzed)} of {len(DIMENSIONS)} dimensions seen"
     coverage = {
+        "provisional": provisional,
         "analyzed": analyzed,
         "unavailable": unavailable,
         "analyzed_count": len(analyzed),
@@ -269,6 +342,7 @@ def compute(org_id, now_iso=None, website_result=None, extra_capabilities=None):
         "capabilities": sorted(caps),
     }
     return {"score": score, "band": key, "band_label": label,
+            "provisional": provisional,
             "methodology": METHODOLOGY, "dimensions": dimensions,
             "coverage": coverage, "measurements": m}
 

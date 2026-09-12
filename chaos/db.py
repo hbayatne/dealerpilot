@@ -251,6 +251,30 @@ def init():
         created_at TEXT
     );
 
+    -- ---------------- inventory (DMS) ----------------
+    CREATE TABLE IF NOT EXISTS vehicles (
+        id {pk},
+        org_id INTEGER NOT NULL,
+        source TEXT,                   -- dealercenter | manual
+        vin TEXT,
+        stock_no TEXT,
+        year INTEGER,
+        make TEXT,
+        model TEXT,
+        trim TEXT,
+        mileage INTEGER,
+        price_cents INTEGER,
+        cost_cents INTEGER,
+        flooring_cents INTEGER,
+        status TEXT,                   -- frontline | recon | sold
+        date_in_stock TEXT,
+        photo_count INTEGER DEFAULT 0,
+        details TEXT DEFAULT '{{}}',
+        first_seen_at TEXT,
+        last_seen_at TEXT,
+        created_at TEXT
+    );
+
     -- ---------------- event ledger ----------------
     CREATE TABLE IF NOT EXISTS events (
         id {pk},
@@ -416,6 +440,8 @@ def init():
         "CREATE INDEX IF NOT EXISTS ix_commit_org ON commitments(org_id, state)",
         "CREATE INDEX IF NOT EXISTS ix_member ON memberships(user_id)",
         "CREATE INDEX IF NOT EXISTS ix_jobrun ON job_runs(org_id, job, id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_vehicle_vin ON vehicles(org_id, vin)",
+        "CREATE INDEX IF NOT EXISTS ix_vehicle_org ON vehicles(org_id, status)",
     ):
         try:
             c.execute(stmt)
@@ -1086,6 +1112,80 @@ def last_outbound_to(org_id, entity_id, before=None, after=None):
 def message_count(org_id):
     with _conn() as c:
         return c.execute("SELECT COUNT(*) n FROM messages WHERE org_id=?",
+                         (org_id,)).fetchone()["n"]
+
+
+# ============================ inventory ============================
+def _row_to_vehicle(r):
+    d = dict(r)
+    d["details"] = _j(d.get("details")) or {}
+    return d
+
+
+def upsert_vehicle(org_id, v):
+    """Insert or refresh one vehicle, keyed on VIN within the org.
+
+    Money is stored in cents as integers throughout. A DMS export gives dollars
+    as text; converting once here means no rule downstream ever does float
+    arithmetic on someone's gross.
+    """
+    c = _conn()
+    try:
+        vin = (v.get("vin") or "").strip().upper() or None
+        existing = None
+        if vin:
+            existing = c.execute("SELECT id, first_seen_at FROM vehicles WHERE org_id=? AND vin=?",
+                                 (org_id, vin)).fetchone()
+        elif v.get("stock_no"):
+            existing = c.execute(
+                "SELECT id, first_seen_at FROM vehicles WHERE org_id=? AND stock_no=? AND vin IS NULL",
+                (org_id, v["stock_no"])).fetchone()
+        fields = (v.get("source", "dealercenter"), vin, v.get("stock_no"), v.get("year"),
+                  v.get("make"), v.get("model"), v.get("trim"), v.get("mileage"),
+                  v.get("price_cents"), v.get("cost_cents"), v.get("flooring_cents"),
+                  v.get("status"), v.get("date_in_stock"), int(v.get("photo_count") or 0),
+                  json.dumps(v.get("details") or {}))
+        if existing:
+            c.execute("""UPDATE vehicles SET source=?, vin=?, stock_no=?, year=?, make=?,
+                           model=?, trim=?, mileage=?, price_cents=?, cost_cents=?,
+                           flooring_cents=?, status=?, date_in_stock=?, photo_count=?,
+                           details=?, last_seen_at=? WHERE id=?""",
+                      fields + (now(), existing["id"]))
+            c.commit()
+            return existing["id"], False
+        vid = c.insert_id(
+            """INSERT INTO vehicles (org_id, source, vin, stock_no, year, make, model, trim,
+                   mileage, price_cents, cost_cents, flooring_cents, status, date_in_stock,
+                   photo_count, details, first_seen_at, last_seen_at, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (org_id,) + fields + (now(), now(), now()))
+        c.commit()
+        return vid, True
+    finally:
+        c.close()
+
+
+def vehicles(org_id, status=None, limit=5000):
+    q = "SELECT * FROM vehicles WHERE org_id=?"
+    params = [org_id]
+    if status:
+        q += " AND status=?"
+        params.append(status)
+    q += " ORDER BY date_in_stock, id LIMIT ?"
+    params.append(limit)
+    with _conn() as c:
+        return [_row_to_vehicle(r) for r in c.execute(q, params).fetchall()]
+
+
+def get_vehicle(org_id, vid):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM vehicles WHERE org_id=? AND id=?", (org_id, vid)).fetchone()
+        return _row_to_vehicle(r) if r else None
+
+
+def vehicle_count(org_id):
+    with _conn() as c:
+        return c.execute("SELECT COUNT(*) n FROM vehicles WHERE org_id=?",
                          (org_id,)).fetchone()["n"]
 
 
