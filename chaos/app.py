@@ -19,13 +19,21 @@ from typing import List, Optional
 
 from chaos import (ai, attention, auth, brief as brief_mod, crypto, db, demo,
                    entitlements, memory, pipeline, ratelimit, scan as scan_mod,
-                   score as score_mod, website)
+                   scheduler, score as score_mod, website)
 from chaos.brand import BRAND
 from chaos.detect import rules
 from chaos.ingest import imap_source
 
 app = FastAPI(title=BRAND.name, docs_url="/api/docs", openapi_url="/api/openapi.json")
 db.init()
+
+
+@app.on_event("startup")
+async def _start_scheduler():
+    """Continuous monitoring. Disabled when CHAOS_SCAN_INTERVAL_HOURS=0, and in
+    tests — importing the app must never start background work."""
+    if scheduler.enabled():
+        asyncio.create_task(scheduler.loop())
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
@@ -271,10 +279,23 @@ def members(org_id: int, user=Depends(current_user)):
 
 
 # ---------------------------------------------------------------- integrations
+@app.get("/api/orgs/{org_id}/jobs")
+def jobs(org_id: int, user=Depends(current_user)):
+    """Sync health. A business that believes it is being watched while the sync
+    broke three weeks ago is worse off than one that knows it isn't."""
+    require_org(org_id, user)
+    return {"jobs": db.job_history(org_id, limit=25),
+            "scheduler": {"enabled": scheduler.enabled(),
+                          "interval_hours": scheduler.INTERVAL_HOURS}}
+
+
 @app.get("/api/orgs/{org_id}/integrations")
 def list_integrations(org_id: int, user=Depends(current_user)):
     ctx = require_org(org_id, user)
     return {"integrations": db.integrations(org_id),
+            "jobs": db.job_history(org_id, limit=5),
+            "scheduler": {"enabled": scheduler.enabled(),
+                          "interval_hours": scheduler.INTERVAL_HOURS},
             "secrets_ready": crypto.available(),
             "secrets_status": crypto.status(),
             "capabilities": sorted(score_mod.capabilities(org_id)),
@@ -613,7 +634,8 @@ def create_demo(user=Depends(current_user)):
     oid = db.create_org(demo.ORG["name"], demo.ORG["website"], demo.ORG["industry"],
                         user_id=user["id"], domains=demo.ORG["domains"])
     org = db.get_org(oid)
-    db.upsert_integration(oid, "imap", label="demo mailbox (sample data)")
+    db.upsert_integration(oid, "imap", label="demo mailbox (sample data)",
+                          config={"sample_data": True})
     now = datetime.datetime.utcnow().replace(microsecond=0)
     msgs, _ = demo.build(now)
     pipeline.ingest(org, msgs)

@@ -21,6 +21,8 @@ anything that hasn't been run says so.
 | Website scan | **Logic verified offline; the network path was never exercised** — this environment's proxy denies arbitrary outbound hosts. Standard `urllib`; will work where egress is allowed. |
 | Control Center UI | **Working.** Verified in Chromium, 15/15 journey steps, no page errors, mobile clean. |
 | Morning brief | **Working.** |
+| Background scheduler | **Working.** Leased in the database so multiple workers cannot duplicate a sync; every run recorded and visible to the customer. |
+| CI | **Working.** Tests on 3.11/3.12, both corpora as their own gate, and a boot-and-probe job. |
 | Prompt-injection defense | **Working** (fence, neutralised markers, no tools offered). |
 | Credential encryption | **Working** (AES-256-GCM; refuses to store without a key). |
 | Session expiry, rate limiting | **Working**, tested. |
@@ -33,8 +35,6 @@ anything that hasn't been run says so.
   but nothing charges anyone. This is the single largest gap to being sellable.
 - **Outbound email.** Password reset exists in `auth.py` but has no transport and
   is not routed in the API. No briefs are delivered; the brief is pull-only.
-- **Background scheduler.** Scans run on request. Nothing runs on a schedule, so
-  "continuous monitoring" is not yet true — it is on-demand monitoring.
 - **Every integration except IMAP.** Calendar, QuickBooks, CRM, phone, reviews,
   Search Console, ads are named in the UI as "coming soon" and nothing more.
 - **Cross-system reconciliation.** The strongest differentiator in the brief, and
@@ -44,7 +44,7 @@ anything that hasn't been run says so.
 ## Verification honestly stated
 
 ```
-49 tests                                   pass
+65 tests                                   pass
 labelled corpus (12 threads)               100% precision, 100% recall
 adversarial corpus (10 cases)              10/10
 browser journey on a clean database        15/15 steps, 0 page errors
@@ -70,11 +70,11 @@ Where a score is below 8, the line says exactly what prevents an 8.
 | Installation simplicity | **7** | Genuinely easy — account, business, app password, scan. But app passwords require the user to already have 2FA set up, which is a real cliff for the messiest businesses, and OAuth isn't built. |
 | UX | **7** | Calm, fast, evidence-first, works on a phone. Missing: search, assigning a finding to an employee, bulk actions, and any notification preferences. |
 | Security | **7** | Strong fundamentals, all tested. Held back by: no CSRF token (relies on SameSite), an in-process rate limiter that breaks across workers, PBKDF2 rather than Argon2, no key rotation, no 2FA, and no independent review. |
-| SaaS readiness | **4** | No billing, no outbound email, no scheduler, single-process assumptions, nothing deployed. The multi-tenant core is sound; the commercial machinery around it does not exist. |
+| SaaS readiness | **5** | Monitoring is now continuous and CI gates the quality bar, which lifts this from 4. Still no billing, no outbound email, and nothing deployed — the multi-tenant core is sound, the commercial machinery around it does not exist. |
 | Subscription value | **5** | A business would get real value from the findings today, but "email hygiene" is a hard thing to charge meaningfully for. The pricing story needs the money dimensions — receivables, leakage — which need QuickBooks. |
 | Differentiation | **8** | Evidence-first proactive detection is genuinely different from both dashboards and chatbots, and commitment detection is something no CRM does. Not a 9 or 10 because the deepest moat — cross-system reconciliation — is described but not built. |
 | Growth potential | **5** | The free website scan works and is shareable. Nothing else exists: no SEO pages, no free tools, no referral loop, no nurture. Acquisition is currently a single unlinked page. |
-| Technical maturity | **7** | Clean architecture, 49 tests, quality harnesses, honest docs. No CI, no linter, no migration framework, no metrics or tracing, never load-tested. |
+| Technical maturity | **7** | Clean architecture, 65 tests, quality harnesses gating CI, honest docs. No linter, no migration framework, no metrics or tracing, never load-tested. |
 | **Overall sellability** | **5** | The core experience is real and would demo convincingly. It cannot be sold: nothing takes money, nothing runs on a schedule, and it has not met real data. This is a strong V1 core, not a product. |
 
 ## Known defects and risks
@@ -91,8 +91,10 @@ Where a score is below 8, the line says exactly what prevents an 8.
    timezone.** The org has a timezone field that nothing reads yet. A business in
    another timezone will see response times skewed by the offset.
 6. **The rate limiter is in-process.** With N workers the effective limit is N×.
-7. **`_RUNNING` scan de-duplication is in-process** and will not prevent
-   concurrent scans across workers.
+7. **`_RUNNING` scan de-duplication is in-process.** The *scheduled* path is
+   leased through the database and is safe across workers; a user pressing "Run
+   a scan" on two workers at once is not. Harmless (ingestion is idempotent) but
+   wasteful.
 8. **No pagination on the entity list** beyond a 500-row cap.
 9. **Demo data is labelled in the UI but shares the findings tables.** A user with
    both a demo and a real org sees them separately, which is correct, but an
@@ -119,25 +121,24 @@ Ranked by (user value × revenue impact × differentiation) ÷ build cost.
 | # | Build | Value | Revenue | Diff. | Cost |
 |---|---|---|---|---|---|
 | 1 | **Run against a real mailbox and fix what breaks** | Critical | High | — | Low |
-| 2 | Background scheduler — make monitoring continuous | High | High | Med | Low |
-| 3 | Stripe billing + trial | Med | **Critical** | Low | Med |
-| 4 | Outbound email (brief delivery, password reset) | High | High | Low | Low |
-| 5 | QuickBooks — receivables, aging, the money dimensions | **Critical** | **Critical** | High | High |
-| 6 | Cross-system reconciliation (needs #5) — the real moat | High | High | **Critical** | Med |
-| 7 | Google Calendar — missed appointments, promised meetings | High | Med | Med | Med |
-| 8 | Gmail/M365 OAuth — removes the app-password cliff | High | Med | Low | Med |
-| 9 | Assign a finding to an employee + notify them | High | Med | Med | Low |
-| 10 | Deploy to Railway with Postgres | Med | High | Low | Low |
-| 11 | Search across memory (people, conversations, findings) | Med | Low | Low | Low |
-| 12 | Notification policy (urgent / daily / weekly) | Med | Med | Low | Low |
-| 13 | Weekly executive review | Med | Med | Med | Low |
-| 14 | Free tools for acquisition (response-time, AR calculators) | Med | Med | Low | Low |
-| 15 | CRM adapter (HubSpot first) | High | High | High | High |
-| 16 | Phone/SMS (Twilio, CallRail) — missed calls | High | High | High | High |
-| 17 | Google Business Profile — unanswered reviews | Med | Med | Med | Med |
-| 18 | Industry packs (vertical terminology and rules) | Med | Med | High | Med |
-| 19 | Value attribution — identified / influenced / recovered | Med | High | High | Med |
-| 20 | Benchmarking across tenants (privacy-safe cohorts) | Med | Med | **Critical** | High |
+| 2 | Stripe billing + trial | Med | **Critical** | Low | Med |
+| 3 | Outbound email (brief delivery, password reset) | High | High | Low | Low |
+| 4 | QuickBooks — receivables, aging, the money dimensions | **Critical** | **Critical** | High | High |
+| 5 | Cross-system reconciliation (needs #4) — the real moat | High | High | **Critical** | Med |
+| 6 | Google Calendar — missed appointments, promised meetings | High | Med | Med | Med |
+| 7 | Gmail/M365 OAuth — removes the app-password cliff | High | Med | Low | Med |
+| 8 | Assign a finding to an employee + notify them | High | Med | Med | Low |
+| 9 | Deploy to Railway with Postgres | Med | High | Low | Low |
+| 10 | Search across memory (people, conversations, findings) | Med | Low | Low | Low |
+| 11 | Notification policy (urgent / daily / weekly) | Med | Med | Low | Low |
+| 12 | Weekly executive review | Med | Med | Med | Low |
+| 13 | Free tools for acquisition (response-time, AR calculators) | Med | Med | Low | Low |
+| 14 | CRM adapter (HubSpot first) | High | High | High | High |
+| 15 | Phone/SMS (Twilio, CallRail) — missed calls | High | High | High | High |
+| 16 | Google Business Profile — unanswered reviews | Med | Med | Med | Med |
+| 17 | Industry packs (vertical terminology and rules) | Med | Med | High | Med |
+| 18 | Value attribution — identified / influenced / recovered | Med | High | High | Med |
+| 19 | Benchmarking across tenants (privacy-safe cohorts) | Med | Med | **Critical** | High |
 
 **If only one thing happens next: number 1.** Every score above is capped by the
 fact that this has never seen real mail, and no amount of further building raises
