@@ -78,6 +78,10 @@ class StatusIn(BaseModel):
     resolution: Optional[str] = None
 
 
+class AssignIn(BaseModel):
+    user_id: Optional[int] = None
+
+
 class MergeIn(BaseModel):
     keep_id: int
     drop_id: int
@@ -434,9 +438,13 @@ def morning_brief(org_id: int, format: str = "json", user=Depends(current_user))
 # ---------------------------------------------------------------- findings
 @app.get("/api/orgs/{org_id}/findings")
 def findings(org_id: int, status: Optional[str] = None, category: Optional[str] = None,
+             assigned_to: Optional[int] = None, mine: bool = False,
              limit: int = 100, offset: int = 0, user=Depends(current_user)):
     ctx = require_org(org_id, user)
-    rows = db.findings(org_id, status=status, category=category, limit=limit, offset=offset)
+    if mine:
+        assigned_to = user["id"]
+    rows = db.findings(org_id, status=status, category=category, limit=limit,
+                       offset=offset, assigned_to=assigned_to)
     ranked = attention.rank(org_id, rows)
     cap = entitlements.limit(ctx["org"], "findings_visible")
     shown = ranked[:cap] if cap else ranked
@@ -489,6 +497,35 @@ def feedback(org_id: int, fid: int, body: FeedbackIn, user=Depends(current_user)
         db.set_finding_status(org_id, fid, "false_positive", body.note)
     db.track("finding_feedback", org_id=org_id, user_id=user["id"], verdict=body.verdict)
     return {"ok": True}
+
+
+@app.post("/api/orgs/{org_id}/findings/{fid}/assign")
+def assign(org_id: int, fid: int, body: AssignIn, user=Depends(current_user)):
+    """Hand a finding to someone. `user_id: null` puts it back in the pool."""
+    ctx = require_org(org_id, user)
+    _need(ctx, "manager")
+    if not db.get_finding(org_id, fid):
+        raise HTTPException(404, "Not found.")
+    if body.user_id is not None and not db.membership(body.user_id, org_id):
+        # Never assign work to someone outside the organization.
+        raise HTTPException(400, "That person is not a member of this organization.")
+    db.assign_finding(org_id, fid, body.user_id)
+    db.audit(org_id, user["id"], "finding.assign", f"finding:{fid}",
+             f"to user {body.user_id}" if body.user_id else "unassigned")
+    db.track("finding_assigned", org_id=org_id, user_id=user["id"])
+    return {"ok": True}
+
+
+@app.get("/api/orgs/{org_id}/workload")
+def workload(org_id: int, user=Depends(current_user)):
+    """Open work per assignee.
+
+    Framed around outcomes, never individuals: "twelve client commitments are
+    unresolved" is management information; "Dana is bad at her job" is a
+    surveillance product, and we are not building one.
+    """
+    require_org(org_id, user)
+    return {"workload": db.workload(org_id), "members": db.members(org_id)}
 
 
 @app.get("/api/orgs/{org_id}/quality")
