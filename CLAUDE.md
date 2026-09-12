@@ -87,5 +87,13 @@ long before being told off for something they were about to do.
 
 ## Testing
 
-`tests/` uses stdlib `unittest` with isolated temp databases. No linter is
-configured. Run the whole suite before pushing — it is fast (about five seconds).
+`tests/` uses stdlib `unittest` with isolated temp databases. Install
+`requirements-dev.txt` (it adds `httpx`, which FastAPI's TestClient needs but the
+app itself does not). No linter is configured.
+
+Run the whole suite before pushing — it is fast, about five seconds. CI runs the
+same three gates: the test suite on 3.11 and 3.12, both finding-quality corpora
+as their own required job, and a boot check that starts the app and probes
+health, the dashboard and the SSRF guard. A change that keeps the unit tests
+green while quietly degrading precision is the regression that matters most,
+which is why the corpora gate the merge in their own right.
