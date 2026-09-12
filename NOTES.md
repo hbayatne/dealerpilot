@@ -44,9 +44,9 @@ anything that hasn't been run says so.
 ## Verification honestly stated
 
 ```
-65 tests                                   pass
+71 tests                                   pass
 labelled corpus (12 threads)               100% precision, 100% recall
-adversarial corpus (10 cases)              10/10
+adversarial corpus (27 cases)              27/27
 browser journey on a clean database        15/15 steps, 0 page errors
 ```
 
@@ -65,7 +65,7 @@ Where a score is below 8, the line says exactly what prevents an 8.
 | Category | Score | What prevents a higher score |
 |---|---|---|
 | Chaos Scan usefulness | **6** | Email only. Seven of twelve dimensions report "not analyzed". The scan is genuinely useful about communication and commitments and silent about money, which is what owners care about most. |
-| Finding accuracy | **7** | Perfect on corpora I wrote; zero minutes against real mail. The guards are good and the evidence is checkable, but the number is unearned until a real mailbox has run through it. |
+| Finding accuracy | **7** | Perfect on corpora I wrote — now 27 adversarial cases asserting *which* detector fires, not merely that one did — but zero minutes against real mail. The guards are good and the evidence is checkable; the number stays unearned until a real mailbox has run through it. |
 | Business Memory | **6** | Resolves people and companies from email and phone well. No CRM or accounting identifiers, no relationship inference beyond "works at", no workflow discovery. The graph is thin because only one system feeds it. |
 | Installation simplicity | **7** | Genuinely easy — account, business, app password, scan. But app passwords require the user to already have 2FA set up, which is a real cliff for the messiest businesses, and OAuth isn't built. |
 | UX | **7** | Calm, fast, evidence-first, works on a phone. Missing: search, assigning a finding to an employee, bulk actions, and any notification preferences. |
@@ -74,15 +74,15 @@ Where a score is below 8, the line says exactly what prevents an 8.
 | Subscription value | **5** | A business would get real value from the findings today, but "email hygiene" is a hard thing to charge meaningfully for. The pricing story needs the money dimensions — receivables, leakage — which need QuickBooks. |
 | Differentiation | **8** | Evidence-first proactive detection is genuinely different from both dashboards and chatbots, and commitment detection is something no CRM does. Not a 9 or 10 because the deepest moat — cross-system reconciliation — is described but not built. |
 | Growth potential | **5** | The free website scan works and is shareable. Nothing else exists: no SEO pages, no free tools, no referral loop, no nurture. Acquisition is currently a single unlinked page. |
-| Technical maturity | **7** | Clean architecture, 65 tests, quality harnesses gating CI, honest docs. No linter, no migration framework, no metrics or tracing, never load-tested. |
+| Technical maturity | **7** | Clean architecture, 71 tests, quality harnesses gating CI, honest docs. No linter, no migration framework, no metrics or tracing, never load-tested. |
 | **Overall sellability** | **5** | The core experience is real and would demo convincingly. It cannot be sold: nothing takes money, nothing runs on a schedule, and it has not met real data. This is a strong V1 core, not a product. |
 
 ## Known defects and risks
 
 1. **False-positive risk on real mail is untested.** Highest risk in the product.
 2. **Forwarded messages** are treated as ordinary mail. A customer complaint
-   forwarded internally could be read as internal chatter (currently correct) or
-   missed entirely (the actual risk).
+   forwarded internally is correctly ignored as internal chatter, but the
+   original complaint is then only visible if we also have the original thread.
 3. **Non-English mail** is unhandled. Commitment and complaint detection are
    English-only; a Spanish-speaking business gets silence, not an error.
 4. **The IMAP cursor is per-folder UID.** A user who reorganizes folders will
