@@ -232,7 +232,7 @@ def stale_opportunity(org, view, now_iso):
                  f"{quiet:.0f} days."),
         severity="high" if quiet > 21 else "medium",
         confidence=round(min(0.9, conf), 3),
-        urgency=min(1.0, 0.35 + quiet / 45.0),
+        urgency=min(0.75, 0.28 + quiet / 60.0),
         impact_cents=value["cents"] if value else None,
         impact_basis=value["basis"] if value else None,
         entity_id=view["conv"].get("entity_id"),
@@ -279,7 +279,7 @@ def quote_without_followup(org, view, now_iso):
                  f"{name} never replied and nobody followed up."),
         severity="high" if quiet > 14 else "medium",
         confidence=round(min(0.9, 0.6 + quiet / 60.0), 3),
-        urgency=min(1.0, 0.4 + quiet / 40.0),
+        urgency=min(0.8, 0.3 + quiet / 60.0),
         impact_cents=value["cents"], impact_basis=value["basis"],
         entity_id=view["conv"].get("entity_id"),
         owner=msg.get("from_addr"),
@@ -325,7 +325,10 @@ def unresolved_complaint(org, view, now_iso):
         severity="critical" if worst["confidence"] >= 0.9 else "high",
         confidence=round(min(0.92, worst["confidence"] * 0.95 +
                              (0.08 if not after_out else 0)), 3),
-        urgency=min(1.0, 0.6 + waited / 120.0),
+        # An escalating customer is the single most time-critical thing a
+        # business faces: the window to save the relationship is measured in
+        # hours, and it closes whether or not anyone noticed.
+        urgency=min(1.0, 0.62 + worst["confidence"] * 0.3 + waited / 400.0),
         entity_id=view["conv"].get("entity_id"),
         owner=_last_owner(view),
         recommended_action=f"Have a manager contact {name} personally today.",
@@ -450,6 +453,43 @@ _ALSO = {
     "quote_without_followup": "a quote was never followed up",
     "stale_opportunity": "an open opportunity has gone quiet",
 }
+
+
+def record_commitments(org, now_iso=None, limit=2000):
+    """Persist every commitment we can find, with its current state.
+
+    Findings are the urgent slice; this is the full ledger. An owner asking
+    "what did we promise customers?" is asking for this table, and it has to
+    contain the kept promises too — a record that only lists failures is a
+    complaints log, not a commitment register.
+    """
+    now_iso = now_iso or db.now()
+    counts = {"total": 0, "open": 0, "overdue": 0, "likely_fulfilled": 0}
+    for conv in db.conversations(org["id"], limit=limit):
+        view = _thread_view(org["id"], conv)
+        for m in view["outbound"]:
+            for c in commit_mod.extract(m.get("body") or "", m.get("sent_at")):
+                later = [x for x in view["outbound"]
+                         if (x["sent_at"] or "") > (m["sent_at"] or "") and x["id"] != m["id"]]
+                if c["due_at"] and any((x["sent_at"] or "") <= c["due_at"] for x in later):
+                    state = "likely_fulfilled"
+                elif later:
+                    state = "likely_fulfilled"
+                elif c["due_at"] and c["due_at"] < now_iso:
+                    state = "overdue"
+                elif not c["due_at"]:
+                    state = "open"
+                else:
+                    state = "open"
+                db.upsert_commitment(
+                    org["id"], message_id=m["id"], conversation_id=conv["id"],
+                    entity_id=conv.get("entity_id"), promiser=m.get("from_addr"),
+                    direction="out", text=c["action"], quote=c["quote"],
+                    due_at=c["due_at"], due_basis=c["due_basis"], state=state,
+                    confidence=c["confidence"], detector="commitment_engine")
+                counts["total"] += 1
+                counts[state] = counts.get(state, 0) + 1
+    return counts
 
 
 def run(org, now_iso=None, limit=2000):
