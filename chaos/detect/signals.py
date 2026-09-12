@@ -51,7 +51,28 @@ def money_amounts(text):
 
 
 def _around(text, start, end, pad=70):
-    return re.sub(r"\s+", " ", text[max(0, start - pad):min(len(text), end + pad)]).strip()
+    """An excerpt around a match, snapped to word boundaries.
+
+    Evidence is quoted to a human. A quote that begins mid-word ("…ining now")
+    reads as a bug and quietly costs the finding its credibility, so the window
+    is widened to the nearest whitespace and marked with an ellipsis when it was
+    actually cut.
+    """
+    lo, hi = max(0, start - pad), min(len(text), end + pad)
+    if lo > 0:
+        # First boundary at or after `lo` — not the one nearest the match, which
+        # would collapse the excerpt to the matched phrase alone.
+        space = text.find(" ", lo, start)
+        lo = space + 1 if space != -1 else lo
+    if hi < len(text):
+        space = text.rfind(" ", end, hi)
+        hi = space if space != -1 else hi
+    excerpt = re.sub(r"\s+", " ", text[lo:hi]).strip()
+    if lo > 0:
+        excerpt = "… " + excerpt
+    if hi < len(text.rstrip()):
+        excerpt = excerpt + " …"
+    return excerpt
 
 
 def deal_value(text):
@@ -126,7 +147,9 @@ _INTENT = [
                 r"put a deposit|wire the (funds|money))\b", re.I), 0.95, "ready to buy"),
     (re.compile(r"\b(what'?s? (the|your) (best )?price|how much (is|for|would)|"
                 r"can you (send|give) (me )?(a |an )?(quote|estimate|price|pricing)|"
-                r"quote me|pricing on|cost to|what would it cost|ballpark)\b", re.I),
+                r"quote me|pricing on|cost to|what would it cost|ballpark|"
+                r"price (?:out|up)|quote (?:out|on)|what do you charge|"
+                r"how much would it be|send (?:over )?(?:a )?(?:quote|estimate|price))\b", re.I),
      0.85, "asked for pricing"),
     (re.compile(r"\b(is (it|this|that) (still )?available|do you (still )?have|"
                 r"in stock|availability|can i (see|come by|come in|test drive|"

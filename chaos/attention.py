@@ -110,8 +110,11 @@ def today(org_id, ranked=None, limit=6, now_iso=None):
     """
     ranked = ranked if ranked is not None else rank(org_id, now_iso=now_iso)
     picked, per_category = [], {}
+    # Always offer a few, even on a quiet day: a list that is usually empty stops
+    # being opened, and then the day it matters nobody looks.
+    floor = min(3, len(ranked))
     for f in ranked:
-        if f["attention"] < OWNER_THRESHOLD and picked:
+        if f["attention"] < OWNER_THRESHOLD and len(picked) >= floor:
             break
         cat = f.get("category")
         if per_category.get(cat, 0) >= 2 and len(picked) >= 3:
