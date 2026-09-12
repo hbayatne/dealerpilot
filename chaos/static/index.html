@@ -671,6 +671,14 @@ async function renderConnect(){
     <h1>Connections</h1>
     <p class="muted small">Each one you connect turns on a category of intelligence we can't
       see otherwise. We say exactly what's missing rather than guessing.</p>
+    <div class="${(d.jobs||[]).some(j=>j.status==='error')?'err':'ok'}" style="margin-top:12px">
+      ${d.scheduler&&d.scheduler.enabled
+        ? `Monitoring is on — we re-check every ${d.scheduler.interval_hours} hours.`
+        : `Monitoring is off. Scans only run when you press “Run a scan”.`}
+      ${(d.jobs||[]).length
+        ? ` Last run ${esc(ago(d.jobs[0].finished_at||d.jobs[0].started_at))}: ${esc(d.jobs[0].status)}${d.jobs[0].detail?' — '+esc(d.jobs[0].detail):''}.`
+        : ' No scheduled run yet.'}
+    </div>
     ${!d.secrets_ready?`<div class="banner" style="margin-top:12px">Credentials cannot be stored:
       ${esc(d.secrets_status)}</div>`:''}
     ${d.available.map(a=>{
@@ -692,7 +700,18 @@ async function renderConnect(){
         </div></div>`;
     }).join('')}
     <div id="mailboxForm"></div>
-  </div>`;
+  </div>
+  ${(d.jobs||[]).length?`<div class="card">
+    <h2>Sync history</h2>
+    <p class="muted small">Every scheduled run, successful or not. We would rather show you
+      a broken sync than let you believe you are being watched when you aren't.</p>
+    <table><thead><tr><th>When</th><th>Job</th><th>Result</th><th>Detail</th></tr></thead>
+    <tbody>${d.jobs.map(j=>`<tr>
+      <td class="small muted">${esc(when(j.finished_at||j.started_at))}</td>
+      <td class="small">${esc(j.job)}</td>
+      <td class="small"><span class="pill ${j.status==='error'?'critical':'low'}">${esc(j.status)}</span></td>
+      <td class="small muted">${esc(j.detail||'')}</td></tr>`).join('')}</tbody></table>
+  </div>`:''}`;
 }
 function showMailbox(){
   $('#mailboxForm').innerHTML=`

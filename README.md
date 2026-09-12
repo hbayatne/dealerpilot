@@ -102,6 +102,8 @@ writing plaintext).
 | `DATABASE_URL` | Postgres in production; SQLite (`CHAOS_DB`) otherwise |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Draft replies only |
 | `CHAOS_SESSION_TTL_DAYS` | Absolute session lifetime (default 30) |
+| `CHAOS_SCAN_INTERVAL_HOURS` | Re-scan interval (default 6; `0` disables monitoring) |
+| `CHAOS_DISABLE_SCHEDULER` | `1` to turn background scanning off entirely |
 | `CHAOS_TRUST_PROXY` | Honour `X-Forwarded-For` for rate limiting |
 | `CHAOS_SECURE_COOKIES` | `0` for local http development |
 | `BRAND_*` | Rename the product without touching code |
@@ -122,6 +124,7 @@ chaos/
   attention.py    what the owner actually sees
   scan.py         the orchestrator
   brief.py        the morning brief
+  scheduler.py    continuous monitoring, leased so workers do not duplicate
   app.py          HTTP API + Control Center
   static/         the single-file UI
   corpus/         labelled corpora the detectors are measured against

@@ -26,6 +26,8 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Unit and integration tests
+        env:
+          CHAOS_DISABLE_SCHEDULER: "1"
         run: python -m unittest discover -s tests -v
 
   finding-quality:
@@ -64,6 +66,7 @@ jobs:
         env:
           CHAOS_SECRET_KEY: ci-test-key
           CHAOS_DB: /tmp/ci-chaos.db
+          CHAOS_DISABLE_SCHEDULER: "1"
         run: |
           python3 -m uvicorn chaos.app:app --host 127.0.0.1 --port 8000 &
           for i in $(seq 1 30); do

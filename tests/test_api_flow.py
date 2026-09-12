@@ -8,6 +8,8 @@ import unittest
 os.environ["CHAOS_DB"] = os.path.join(tempfile.mkdtemp(), "api.db")
 os.environ["CHAOS_SECRET_KEY"] = "test-key"
 os.environ["CHAOS_SECURE_COOKIES"] = "0"
+# Importing the app must never start background work in a test run.
+os.environ["CHAOS_DISABLE_SCHEDULER"] = "1"
 
 from fastapi.testclient import TestClient                    # noqa: E402
 from chaos import db, demo, pipeline, ratelimit, scan         # noqa: E402

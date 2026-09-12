@@ -51,6 +51,13 @@ def sync_email(org, integration=None, limit=None):
     if not integ:
         return {"error": "No mailbox connected."}
     cfg = integ.get("config") or {}
+    # A sample-data org carries an integration row so the UI reads naturally, but
+    # there is nothing behind it. Attempting a connection would report a broken
+    # mailbox on every scheduled run for a business that never connected one.
+    if cfg.get("sample_data"):
+        return {"skipped": "sample data — no real mailbox is connected", "fetched": 0}
+    if not cfg.get("host") or not integ.get("secret"):
+        return {"error": "This mailbox is not fully configured. Reconnect it."}
     try:
         password = crypto.decrypt(integ.get("secret"))
     except crypto.SecretsUnavailable as e:

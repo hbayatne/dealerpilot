@@ -363,6 +363,21 @@ def init():
         finished_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS job_runs (
+        id {pk},
+        org_id INTEGER,
+        job TEXT NOT NULL,
+        status TEXT,                   -- running | ok | error
+        detail TEXT,
+        started_at TEXT,
+        finished_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS job_leases (
+        name TEXT PRIMARY KEY,
+        holder TEXT,
+        expires_at TEXT
+    );
+
     -- ---------------- platform ----------------
     CREATE TABLE IF NOT EXISTS analytics_events (
         id {pk},
@@ -397,6 +412,7 @@ def init():
         "CREATE INDEX IF NOT EXISTS ix_evid_find ON evidence(org_id, finding_id, seq)",
         "CREATE INDEX IF NOT EXISTS ix_commit_org ON commitments(org_id, state)",
         "CREATE INDEX IF NOT EXISTS ix_member ON memberships(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_jobrun ON job_runs(org_id, job, id)",
     ):
         try:
             c.execute(stmt)
@@ -649,6 +665,84 @@ def mark_sync(org_id, kind, cursor=None, error=None):
 def delete_integration(org_id, kind):
     with _conn() as c:
         c.execute("DELETE FROM integrations WHERE org_id=? AND kind=?", (org_id, kind))
+
+
+# ============================ jobs ============================
+def acquire_lease(name, holder, ttl_seconds):
+    """Claim a named lease, or return False if someone else holds a live one.
+
+    The scheduler runs inside the web process, so N workers means N schedulers
+    all syncing the same mailboxes. A lease in the shared database is the only
+    coordination point they all have; without it the duplicate work is invisible
+    and the provider rate-limits are hit N times faster.
+    """
+    now_s = datetime.datetime.utcnow()
+    expires = (now_s + datetime.timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
+    cutoff = now_s.isoformat(timespec="seconds")
+    c = _conn()
+    try:
+        r = c.execute("SELECT holder, expires_at FROM job_leases WHERE name=?",
+                      (name,)).fetchone()
+        if r is None:
+            try:
+                c.execute("INSERT INTO job_leases (name,holder,expires_at) VALUES (?,?,?)",
+                          (name, holder, expires))
+                c.commit()
+                return True
+            except _INTEGRITY_ERRORS:
+                return False
+        if r["holder"] == holder or (r["expires_at"] or "") < cutoff:
+            # Ours to renew, or the previous holder's lease has lapsed.
+            cur = c.execute(
+                """UPDATE job_leases SET holder=?, expires_at=?
+                   WHERE name=? AND (holder=? OR expires_at < ?)""",
+                (holder, expires, name, holder, cutoff))
+            c.commit()
+            return cur.rowcount > 0
+        return False
+    finally:
+        c.close()
+
+
+def release_lease(name, holder):
+    with _conn() as c:
+        c.execute("DELETE FROM job_leases WHERE name=? AND holder=?", (name, holder))
+
+
+def start_job(org_id, job):
+    with _conn() as c:
+        return c.insert_id(
+            """INSERT INTO job_runs (org_id,job,status,started_at) VALUES (?,?,?,?)""",
+            (org_id, job, "running", now()))
+
+
+def finish_job(job_id, status, detail=None):
+    with _conn() as c:
+        c.execute("UPDATE job_runs SET status=?, detail=?, finished_at=? WHERE id=?",
+                  (status, (detail or "")[:500], now(), job_id))
+
+
+def job_history(org_id=None, limit=50):
+    q = "SELECT * FROM job_runs"
+    params = []
+    if org_id is not None:
+        q += " WHERE org_id=?"
+        params.append(org_id)
+    q += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with _conn() as c:
+        return [dict(r) for r in c.execute(q, params).fetchall()]
+
+
+def orgs_with_integrations(kind=None):
+    """Orgs the scheduler should visit."""
+    q = """SELECT DISTINCT org_id FROM integrations WHERE status != 'disabled'"""
+    params = []
+    if kind:
+        q += " AND kind=?"
+        params.append(kind)
+    with _conn() as c:
+        return [r["org_id"] for r in c.execute(q, params).fetchall()]
 
 
 # ============================ analytics / audit ============================

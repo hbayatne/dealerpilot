@@ -60,11 +60,28 @@ def encrypt(plaintext: str) -> str:
 
 
 def decrypt(blob: str) -> str:
+    """Recover a stored credential.
+
+    Every failure mode surfaces as one exception carrying a sentence a person can
+    act on. Letting a raw `binascii.Error: Incorrect padding` reach a customer
+    tells them nothing about what to do, and it reaches them — this text ends up
+    in the integration's error banner.
+    """
     if not blob:
         return None
     if not blob.startswith(_PREFIX):
-        raise SecretsUnavailable("stored credential is not in a recognized format")
+        raise SecretsUnavailable("This stored credential is in an unrecognized "
+                                 "format. Reconnect the integration.")
     if not available():
         raise SecretsUnavailable(status())
-    raw = base64.urlsafe_b64decode(blob[len(_PREFIX):].encode())
-    return AESGCM(_key()).decrypt(raw[:12], raw[12:], None).decode()
+    try:
+        raw = base64.urlsafe_b64decode(blob[len(_PREFIX):].encode())
+        return AESGCM(_key()).decrypt(raw[:12], raw[12:], None).decode()
+    except SecretsUnavailable:
+        raise
+    except Exception:
+        # Wrong key, or a corrupted/truncated value. Either way the fix is the
+        # same and the cause is not something the customer can diagnose.
+        raise SecretsUnavailable(
+            "This stored credential could not be read — it may have been saved "
+            "with a different encryption key. Reconnect the integration.")
