@@ -237,6 +237,7 @@ def init():
         from_addr TEXT,
         from_name TEXT,
         to_addrs TEXT DEFAULT '[]',
+        cc_addrs TEXT DEFAULT '[]',
         sent_at TEXT,
         subject TEXT,
         body TEXT,                     -- retention-governed, see privacy.py
@@ -943,6 +944,7 @@ def merge_entities(org_id, keep_id, drop_id):
 def _row_to_message(r):
     d = dict(r)
     d["to_addrs"] = _j(d.get("to_addrs")) or []
+    d["cc_addrs"] = _j(d.get("cc_addrs")) or []
     return d
 
 
@@ -1007,13 +1009,14 @@ def add_message(org_id, **m):
     try:
         mid = c.insert_id(
             """INSERT INTO messages (org_id,conversation_id,source,source_id,direction,
-                   from_addr,from_name,to_addrs,sent_at,subject,body,snippet,
+                   from_addr,from_name,to_addrs,cc_addrs,sent_at,subject,body,snippet,
                    automated,auto_kind,attachments,thread_key,entity_id,
                    actor_entity_id,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (org_id, m.get("conversation_id"), m.get("source", "email"), m.get("source_id"),
              m.get("direction"), m.get("from_addr"), m.get("from_name"),
-             json.dumps(m.get("to_addrs") or []), m.get("sent_at"), m.get("subject"),
+             json.dumps(m.get("to_addrs") or []), json.dumps(m.get("cc_addrs") or []),
+             m.get("sent_at"), m.get("subject"),
              m.get("body"), m.get("snippet"), m.get("automated"), m.get("auto_kind"),
              int(m.get("attachments") or 0), m.get("thread_key"), m.get("entity_id"),
              m.get("actor_entity_id"), now()))

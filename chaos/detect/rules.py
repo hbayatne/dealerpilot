@@ -17,7 +17,7 @@ removed a class of false positive:
 """
 import hashlib
 
-from chaos import db
+from chaos import db, memory
 from chaos.detect import base, commitments as commit_mod, signals as S
 
 # Thresholds. Deliberately conservative: a finding that fires too early is a
@@ -79,11 +79,29 @@ def _replied_after(view, ts):
 
 
 # ---------------------------------------------------------------- rules
+def _addressed_to_us(org, msg):
+    """Was this message actually asking *us*, or were we just copied?
+
+    Being CC'd on a conversation between other people carries no obligation to
+    reply, and treating it as one fills the feed with other organizations'
+    business. We only owe an answer when one of our addresses is in To.
+    """
+    to = msg.get("to_addrs") or []
+    cc = msg.get("cc_addrs") or []
+    if any(memory.is_internal(org, a) for a in to):
+        return True
+    # Nobody internal in To. If we're not in Cc either, the addressing is
+    # unusual (BCC, a list, a forward) — assume it is ours rather than drop it.
+    return not any(memory.is_internal(org, a) for a in cc)
+
+
 def unanswered_inbound(org, view, now_iso):
     """A customer asked us something and nobody answered."""
     real = view["real"]
     last = real[-1]
     if last["direction"] != "in":
+        return None
+    if not _addressed_to_us(org, last):
         return None
     body = last.get("body") or ""
     if not S.asks_something(body):
@@ -168,6 +186,12 @@ def overdue_commitment(org, view, now_iso):
             fulfilled_before_due = [x for x in later if (x["sent_at"] or "") <= c["due_at"]]
             if fulfilled_before_due:
                 continue                       # looks handled — say nothing
+            # We only see email. A promise to call, or to come by on Friday, is
+            # kept in person — so silence in the mailbox is weak evidence. The
+            # customer saying "perfect, thanks, all sorted" afterwards is much
+            # stronger evidence the other way, and we defer to it.
+            if _customer_closed_after(view, m["sent_at"]):
+                continue
             overdue_by = base.days_between(c["due_at"], now_iso)
             # Due dates land at end-of-day, so a few hours past is genuinely past.
             if overdue_by < 0.25:
@@ -414,6 +438,14 @@ def _entity_name(org_id, entity_id):
     return _NAME_CACHE[key]
 
 
+def _customer_closed_after(view, ts):
+    """Did the customer signal satisfaction after this point?"""
+    for x in view["inbound"]:
+        if (x["sent_at"] or "") > (ts or "") and S.looks_closed(x.get("body") or ""):
+            return True
+    return False
+
+
 def _last_owner(view):
     return view["outbound"][-1].get("from_addr") if view["outbound"] else None
 
@@ -542,6 +574,9 @@ def record_commitments(org, now_iso=None, limit=2000):
                 if c["due_at"] and any((x["sent_at"] or "") <= c["due_at"] for x in later):
                     state = "likely_fulfilled"
                 elif later:
+                    state = "likely_fulfilled"
+                elif _customer_closed_after(view, m["sent_at"]):
+                    # Kept off-email, and the customer confirmed it.
                     state = "likely_fulfilled"
                 elif c["due_at"] and c["due_at"] < now_iso:
                     state = "overdue"
