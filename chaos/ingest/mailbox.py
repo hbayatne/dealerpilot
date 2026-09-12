@@ -135,6 +135,107 @@ _MARKETING_SUBJECT = re.compile(
     r"out of office|automatic reply|undeliverable|delivery status notification)", re.I)
 
 
+_BOUNCE_PREFIX = re.compile(
+    r"^\s*(?:undeliverable|undelivered mail returned to sender|returned mail|"
+    r"delivery status notification(?:\s*\([^)]*\))?|mail delivery failed|"
+    r"failure notice|message not delivered|delivery failure)\s*[:\-]?\s*", re.I)
+
+
+def bounced_subject(subject):
+    """The original subject a bounce is reporting on, or None.
+
+    Bounce notices are almost always "Undeliverable: <original subject>". When
+    the failed address isn't quotable from the body, this is what lets us match
+    the bounce back to the message it concerns.
+    """
+    s = (subject or "").strip()
+    stripped = _BOUNCE_PREFIX.sub("", s)
+    if stripped and stripped != s:
+        return normalize_subject(stripped)
+    return None
+
+
+_BOUNCE_SUBJECT = re.compile(
+    r"(undeliverable|delivery (?:status notification|failure|has failed)|"
+    r"returned mail|mail delivery (?:failed|subsystem)|message not delivered|"
+    r"failure notice|address not found)", re.I)
+
+_OOO_SUBJECT = re.compile(
+    r"(out of (?:the )?office|automatic reply|auto(?:matic)?[- ]?response|"
+    r"away from (?:my |the )?(?:desk|office)|on (?:vacation|leave|holiday)|"
+    r"maternity leave|parental leave)", re.I)
+
+
+def bounce_reason(headers, from_addr, subject, body=""):
+    """Why this looks like a delivery failure, or None.
+
+    A bounce matters far beyond tidiness: it means a message the business
+    believes it sent was never received. Mistaking one for a customer's silence
+    produces a finding that blames the wrong party for the wrong thing.
+    """
+    h = {k.lower(): (v or "") for k, v in (headers or {}).items()}
+    local = (from_addr or "").split("@", 1)[0].lower()
+    if local in ("mailer-daemon", "postmaster", "mail-daemon"):
+        return f"delivery failure reported by {from_addr}"
+    if h.get("content-type", "").lower().startswith("multipart/report") or \
+            "delivery-status" in h.get("content-type", "").lower():
+        return "delivery status notification"
+    if _BOUNCE_SUBJECT.search(subject or ""):
+        return f"delivery failure ({(subject or '').strip()[:60]})"
+    if re.search(r"\b(550|551|552|553|554)\b.{0,40}(user unknown|no such user|"
+                 r"does not exist|mailbox unavailable|recipient rejected)", body or "", re.I):
+        return "SMTP permanent failure in the message body"
+    return None
+
+
+def failed_recipients(headers, body, exclude=()):
+    """Which addresses a bounce says could not be reached.
+
+    A bounce almost never threads with the message it is about — different
+    subject, no References — so without pulling the failed address out of it,
+    the original conversation never learns its mail didn't land. The address is
+    in `X-Failed-Recipients` when the server is well behaved, and in the body
+    otherwise.
+    """
+    h = {k.lower(): (v or "") for k, v in (headers or {}).items()}
+    out, seen = [], set()
+    for raw in (h.get("x-failed-recipients", ""), h.get("original-recipient", ""),
+                h.get("final-recipient", "")):
+        for m in _ADDR_RE.finditer(raw):
+            a = m.group(0).lower()
+            if a not in seen:
+                seen.add(a)
+                out.append(a)
+    if out:
+        return out
+    skip = {s.lower() for s in exclude}
+    for m in _ADDR_RE.finditer(body or ""):
+        a = m.group(0).lower()
+        local = a.split("@", 1)[0]
+        if a in seen or a in skip or _NOREPLY_LOCAL.match(local):
+            continue
+        seen.add(a)
+        out.append(a)
+    return out[:3]
+
+
+def out_of_office_reason(headers, subject):
+    """Why this looks like an out-of-office auto-reply, or None.
+
+    The counterparty answered — they just aren't there. Reporting "they never
+    replied" in that situation is simply false, and an owner who spots one such
+    claim reasonably distrusts the next hundred.
+    """
+    h = {k.lower(): (v or "") for k, v in (headers or {}).items()}
+    if h.get("x-autoreply") or h.get("x-autorespond"):
+        return "automatic out-of-office reply"
+    if h.get("auto-submitted", "").lower().startswith("auto-replied"):
+        return "automatic out-of-office reply"
+    if _OOO_SUBJECT.search(subject or ""):
+        return f"auto-reply ({(subject or '').strip()[:60]})"
+    return None
+
+
 def classify_automation(headers, from_addr, subject):
     """Why we believe a message is machine-generated, or None when it looks human.
 
@@ -178,7 +279,6 @@ _QUOTE_MARKERS = [
 ]
 
 _SIG_MARKERS = [
-    re.compile(r"^\s*--\s*$", re.M),
     re.compile(r"^\s*(Sent from my (iPhone|iPad|Android|Samsung|mobile device))\s*$", re.I | re.M),
     re.compile(r"^\s*(Best regards|Kind regards|Warm regards|Regards|Thanks|Thank you|"
                r"Sincerely|Cheers|Best),?\s*$", re.I | re.M),
@@ -217,19 +317,32 @@ def strip_quoted(body):
     return head, text[cut:].strip()
 
 
+_SIG_DELIM = re.compile(r"^-- ?$", re.M)
+
+
 def strip_signature(text):
     """Drop a trailing signature block so contact-detail boilerplate doesn't get
-    mistaken for message content."""
+    mistaken for message content.
+
+    A line containing exactly "--" is the RFC 3676 signature delimiter and means
+    *everything after this is a signature*, wherever it appears. It gets cut
+    unconditionally: a one-word reply followed by a six-line footer is extremely
+    common, and treating the footer as content turns "Thanks!" into an unanswered
+    question. The softer markers ("Best regards", "Sent from my iPhone") are only
+    honoured near the end, because they also occur mid-message.
+    """
     if not text:
         return ""
     best = len(text)
+    m = _SIG_DELIM.search(text)
+    if m and m.start() > 0:
+        best = m.start()
     for rx in _SIG_MARKERS:
         for m in rx.finditer(text):
-            # Only treat it as a signature if it's in the last third of the body.
             if m.start() > len(text) * 0.55:
                 best = min(best, m.start())
     out = text[:best].strip()
-    return out if len(out) >= 12 else text.strip()
+    return out if out else text.strip()
 
 
 def clean_body(raw):

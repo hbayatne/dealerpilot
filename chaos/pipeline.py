@@ -19,6 +19,46 @@ from chaos import db, memory
 from chaos.ingest import mailbox as M
 
 
+def _recipients_of_bounced_subject(org_id, bounce_subject, bounce_at):
+    """Who we last wrote to under the subject this bounce names.
+
+    The fallback for servers that report a failure without quoting the address.
+    Scoped to the fortnight before the bounce so an old thread with the same
+    subject can't be blamed for it.
+    """
+    original = M.bounced_subject(bounce_subject)
+    if not original:
+        return []
+    original = original.lower()
+    import datetime
+    try:
+        floor = (datetime.datetime.fromisoformat(bounce_at)
+                 - datetime.timedelta(days=14)).isoformat(timespec="seconds")
+    except Exception:
+        floor = ""
+    with db._conn() as c:
+        rows = c.execute(
+            """SELECT to_addrs, subject FROM messages
+               WHERE org_id=? AND direction='out' AND sent_at<=? AND sent_at>=?
+               ORDER BY sent_at DESC LIMIT 50""",
+            (org_id, bounce_at or "9999", floor)).fetchall()
+    import json
+    rows = [r for r in rows
+            if M.normalize_subject(r["subject"] or "").lower() == original]
+    for r in rows:
+        try:
+            addrs = json.loads(r["to_addrs"] or "[]")
+        except Exception:
+            continue
+        for a in addrs:
+            return [a]
+    return []
+
+
+def internals_of(org, addrs):
+    return [a for a in (addrs or []) if memory.is_internal(org, a)]
+
+
 def classify_direction(org, from_addr, to_addrs):
     """in = from the outside world, out = from us, internal = only us.
 
@@ -76,15 +116,39 @@ def ingest(org, raw_messages, source="email"):
         recipients = to_list + cc_list
         sent_at = M.parse_date(raw.get("date"))
         direction = classify_direction(org, from_addr, recipients)
-        automated = M.classify_automation(raw.get("headers") or {}, from_addr,
-                                          raw.get("subject"))
+        headers = raw.get("headers") or {}
+        bounce = M.bounce_reason(headers, from_addr, raw.get("subject"), raw.get("body"))
+        ooo = None if bounce else M.out_of_office_reason(headers, raw.get("subject"))
+        automated = bounce or ooo or M.classify_automation(headers, from_addr,
+                                                           raw.get("subject"))
+        auto_kind = "bounce" if bounce else ("out_of_office" if ooo else
+                                             ("bulk" if automated else None))
         if automated:
             stats["automated"] += 1
+            stats[auto_kind] = stats.get(auto_kind, 0) + 1
 
         # The outside party is the counterparty of the conversation; the internal
         # address is whoever on our side is handling it.
         externals = [a for a in ([from_addr] + recipients) if not memory.is_internal(org, a)]
         internals = [a for a in ([from_addr] + recipients) if memory.is_internal(org, a)]
+
+        # A bounce is *about* someone other than its sender. Re-point it at the
+        # contact whose address failed, so the conversation that matters learns
+        # its message never arrived.
+        if bounce:
+            failed = M.failed_recipients(headers, raw.get("body"),
+                                         exclude=[from_addr] + internals_of(org, recipients))
+            if not failed:
+                failed = _recipients_of_bounced_subject(org_id, raw.get("subject"), sent_at)
+            for addr in failed:
+                target = db.find_by_identity(org_id, "email", addr)
+                if target:
+                    db.add_event(org_id, "EMAIL_BOUNCED", occurred_at=sent_at,
+                                 source=source, source_id=raw.get("source_id"),
+                                 entity_id=target["id"], confidence=0.95,
+                                 payload={"address": addr, "reason": bounce})
+                    externals = [addr] + [a for a in externals if a != addr]
+                    break
 
         counterparty = None
         if externals:
@@ -121,7 +185,8 @@ def ingest(org, raw_messages, source="email"):
             direction=direction, from_addr=from_addr,
             from_name=raw.get("from_name"), to_addrs=recipients, sent_at=sent_at,
             subject=raw.get("subject"), body=clean, snippet=M.snippet_of(clean),
-            automated=automated, attachments=len(raw.get("attachments") or []),
+            automated=automated, auto_kind=auto_kind,
+            attachments=len(raw.get("attachments") or []),
             thread_key=tkey,
             entity_id=counterparty["id"] if counterparty else None,
             actor_entity_id=actor["id"] if actor else None)
@@ -138,7 +203,8 @@ def ingest(org, raw_messages, source="email"):
                      entity_id=counterparty["id"] if counterparty else None,
                      ref_kind="message", ref_id=mid,
                      confidence=1.0,
-                     payload={"subject": raw.get("subject"), "automated": automated})
+                     payload={"subject": raw.get("subject"), "automated": automated,
+                              "auto_kind": auto_kind})
 
     for cid in touched_convs:
         db.refresh_conversation(org_id, cid)

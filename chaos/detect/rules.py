@@ -43,6 +43,8 @@ def _thread_view(org_id, conv):
         "real": real,
         "inbound": [m for m in real if m["direction"] == "in"],
         "outbound": [m for m in real if m["direction"] == "out"],
+        "bounces": [m for m in msgs if m.get("auto_kind") == "bounce"],
+        "out_of_office": [m for m in msgs if m.get("auto_kind") == "out_of_office"],
     }
 
 
@@ -60,6 +62,20 @@ def _eligible(org, view, now_iso):
         if S.opted_out(m.get("body") or ""):
             return "contact asked not to be contacted"
     return None
+
+
+def _replied_after(view, ts):
+    """Any inbound after `ts`, counting auto-replies.
+
+    An out-of-office is a reply. Saying "they never replied" when the mailbox
+    answered to say they are away is a false statement, and one visibly false
+    finding costs the credibility of the rest.
+    """
+    # `>=` on purpose: an auto-reply lands in the same second as the message it
+    # answers often enough that a strict `>` silently misses it.
+    return [m for m in view["messages"]
+            if m["direction"] == "in" and (m["sent_at"] or "") >= (ts or "")
+            and m.get("direction") == "in"]
 
 
 # ---------------------------------------------------------------- rules
@@ -253,9 +269,9 @@ def quote_without_followup(org, view, now_iso):
     if not priced:
         return None
     msg, value = priced
+    if _replied_after(view, msg["sent_at"]):
+        return None          # they responded (an out-of-office counts) — not this finding
     after = [m for m in view["real"] if (m["sent_at"] or "") > (msg["sent_at"] or "")]
-    if any(m["direction"] == "in" for m in after):
-        return None                     # they responded — not this finding
     if any(m["direction"] == "out" for m in after):
         return None                     # we did chase
     quiet = base.days_between(msg["sent_at"], now_iso)
@@ -337,6 +353,53 @@ def unresolved_complaint(org, view, now_iso):
     return f, ev
 
 
+def undelivered_email(org, now_iso):
+    """We think we contacted this customer. We didn't — the email bounced.
+
+    This is the quietest way a business loses someone: the message sits in Sent,
+    everybody assumes it landed, and the customer hears nothing. Nobody reads
+    bounce notices.
+
+    Driven off the event ledger rather than a single thread, because a bounce
+    almost never threads with the message it is about — different subject, no
+    References. The pipeline resolves which contact failed; this reads that.
+    """
+    out = []
+    for ev in db.events(org["id"], kind="EMAIL_BOUNCED", limit=500):
+        eid = ev.get("entity_id")
+        if not eid:
+            continue
+        bounce_at = ev.get("occurred_at")
+        sent = db.last_outbound_to(org["id"], eid, before=bounce_at)
+        later = db.last_outbound_to(org["id"], eid, after=bounce_at)
+        if sent is None or later:
+            continue          # nothing failed, or somebody has since got through
+
+        name = _entity_name(org["id"], eid) or (ev.get("payload") or {}).get("address") \
+            or "this contact"
+        reason = (ev.get("payload") or {}).get("reason") or "The mail server rejected it."
+        ev_rows = [
+            base.message_evidence(sent, "What we sent"),
+            base.evidence(bounce_at, "Delivery failed", reason),
+            base.evidence(now_iso, "Never re-sent",
+                          "No later outbound email to this contact."),
+        ]
+        f, _ = base.finding(
+            _key("bounce", org["id"], sent["id"]),
+            "client_communication",
+            f"Your email to {name} never arrived",
+            subcategory="undeliverable",
+            summary=(f"A message to {name} bounced and was never re-sent. As far as "
+                     f"they know, you never replied."),
+            severity="high", confidence=0.9, urgency=0.8,
+            entity_id=eid, owner=sent.get("from_addr"),
+            recommended_action=f"Check {name}'s address and reach them another way.",
+            ai_actionable=False, approval_required=True, risk="low",
+            detector="undelivered_email", detected_at=now_iso, evidence=ev_rows)
+        out.append((f, ev_rows))
+    return out
+
+
 # ---------------------------------------------------------------- helpers
 _NAME_CACHE = {}
 
@@ -366,10 +429,14 @@ def _thread_value(view):
 THREAD_RULES = [unanswered_inbound, overdue_commitment, stale_opportunity,
                 quote_without_followup, unresolved_complaint]
 
+# Rules that need the whole org, not one thread.
+ORG_RULES = [undelivered_email]
+
 # When several rules fire on one thread they are describing one situation, not
 # several. The owner should see "Pat Nguyen is upset and nobody has replied",
 # not four rows about the same customer. Higher number wins the thread.
 _PRIORITY = {
+    "undelivered_email": 6,          # nothing else on the thread is true if this is
     "unresolved_complaint": 5,
     "overdue_commitment": 4,
     "unanswered_inbound": 3,
@@ -447,6 +514,7 @@ def consolidate(results):
 
 
 _ALSO = {
+    "undelivered_email": "an email to them bounced",
     "unresolved_complaint": "the customer sounds unhappy",
     "overdue_commitment": "a commitment we made is past due",
     "unanswered_inbound": "their last message has no reply",
@@ -492,16 +560,33 @@ def record_commitments(org, now_iso=None, limit=2000):
     return counts
 
 
+def bounced_entities(org_id):
+    """Contacts whose mail has failed, from the event ledger.
+
+    Held org-wide rather than per-thread because a bounce rarely threads with
+    the message it concerns.
+    """
+    return {e["entity_id"] for e in db.events(org_id, kind="EMAIL_BOUNCED", limit=2000)
+            if e.get("entity_id")}
+
+
 def run(org, now_iso=None, limit=2000):
     """Every finding the corpus currently supports, with evidence."""
     _NAME_CACHE.clear()
     now_iso = now_iso or db.now()
+    bounced_contacts = bounced_entities(org["id"])
     out = []
     for conv in db.conversations(org["id"], limit=limit):
         view = _thread_view(org["id"], conv)
         if _eligible(org, view, now_iso):
             continue
+        bounced = (bool(view["bounces"])
+                   or conv.get("entity_id") in bounced_contacts)
         for rule in THREAD_RULES:
+            if bounced and rule.__name__ in (
+                    "overdue_commitment", "unanswered_inbound", "stale_opportunity",
+                    "quote_without_followup"):
+                continue     # the mail never arrived; none of those conclusions hold
             try:
                 res = rule(org, view, now_iso)
             except Exception:
@@ -511,4 +596,12 @@ def run(org, now_iso=None, limit=2000):
             for f, ev in (res if isinstance(res, list) else [res]):
                 f["_conversation_id"] = conv["id"]
                 out.append((f, ev))
+
+    for rule in ORG_RULES:
+        try:
+            for f, ev in rule(org, now_iso):
+                f["_conversation_id"] = None
+                out.append((f, ev))
+        except Exception:
+            continue
     return consolidate(out)
