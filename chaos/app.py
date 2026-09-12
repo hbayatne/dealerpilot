@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from chaos import (ai, attention, auth, crypto, db, demo, entitlements, memory,
-                   pipeline, scan as scan_mod, score as score_mod, website)
+                   pipeline, ratelimit, scan as scan_mod, score as score_mod, website)
 from chaos.brand import BRAND
 from chaos.detect import rules
 from chaos.ingest import imap_source
@@ -91,6 +91,24 @@ def current_user(chaos_session: Optional[str] = Cookie(None)):
     return user
 
 
+def client_key(request: Request):
+    """Who to rate-limit. Honours X-Forwarded-For only when explicitly told to
+    trust a proxy — otherwise any client could spoof the header and get a fresh
+    bucket for every attempt, which is worse than no limit at all."""
+    if os.environ.get("CHAOS_TRUST_PROXY") == "1":
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "-"
+
+
+def guard(request: Request, action: str, identifier=None):
+    ok, retry = ratelimit.check(action, identifier or client_key(request))
+    if not ok:
+        raise HTTPException(429, f"Too many attempts. Try again in {retry} seconds.",
+                            headers={"Retry-After": str(retry)})
+
+
 def _set_cookie(response, token):
     response.set_cookie(COOKIE, token, httponly=True, samesite="lax",
                         secure=SECURE_COOKIES, max_age=60 * 60 * 24 * 30, path="/")
@@ -137,8 +155,9 @@ def plans():
 
 
 @app.post("/api/scan/website")
-def public_website_scan(body: ScanIn):
+def public_website_scan(body: ScanIn, request: Request):
     """The free scan. No account required — this is the front door."""
+    guard(request, "website_scan")
     db.track("website_scan_started", url=body.url)
     try:
         website.normalize_url(body.url)
@@ -163,7 +182,8 @@ def shared_scan(token: str):
 
 # ---------------------------------------------------------------- accounts
 @app.post("/api/signup")
-def signup(body: Creds, response: Response):
+def signup(body: Creds, response: Response, request: Request):
+    guard(request, "signup")
     token, uid, err = auth.signup(body.email, body.password, body.name)
     if err:
         raise HTTPException(400, err)
@@ -173,7 +193,11 @@ def signup(body: Creds, response: Response):
 
 
 @app.post("/api/login")
-def login(body: Creds, response: Response):
+def login(body: Creds, response: Response, request: Request):
+    # Limited per source and per account: per-source alone lets a botnet spread
+    # attempts across addresses, per-account alone lets one source walk a user list.
+    guard(request, "login")
+    guard(request, "login", f"acct:{(body.email or '').strip().lower()}")
     token, uid, err = auth.login(body.email, body.password)
     if err:
         raise HTTPException(401, err)
@@ -278,10 +302,12 @@ def _catalog(org):
 
 
 @app.post("/api/orgs/{org_id}/integrations/imap/check")
-def check_mailbox(org_id: int, body: MailboxIn, user=Depends(current_user)):
+def check_mailbox(org_id: int, body: MailboxIn, request: Request,
+                  user=Depends(current_user)):
     """Verify mailbox credentials before storing anything."""
     ctx = require_org(org_id, user)
     _need(ctx, "admin")
+    guard(request, "imap_check", f"org:{org_id}")
     host, port = (body.host, body.port) if body.host else imap_source.guess_host(body.email)
     ok, detail = imap_source.check(host, port, body.email, body.password)
     return {"ok": ok, "detail": detail, "host": host, "port": port}

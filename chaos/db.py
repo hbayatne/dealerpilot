@@ -445,14 +445,39 @@ def create_session(token, user_id):
                   (token, user_id, now()))
 
 
+SESSION_TTL_DAYS = int(os.environ.get("CHAOS_SESSION_TTL_DAYS", "30"))
+
+
 def user_for_session(token):
+    """Resolve a session cookie, honouring an absolute lifetime.
+
+    Sessions expire server-side, not merely in the cookie: a cookie's max-age is
+    a request to the browser, and a stolen token would otherwise be valid
+    forever. An expired row is deleted on the way past so the table self-cleans.
+    """
     if not token:
         return None
+    cutoff = (datetime.datetime.utcnow()
+              - datetime.timedelta(days=SESSION_TTL_DAYS)).isoformat(timespec="seconds")
     with _conn() as c:
         r = c.execute(
-            "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?",
-            (token,)).fetchone()
-        return dict(r) if r else None
+            """SELECT u.*, s.created_at AS session_started FROM sessions s
+               JOIN users u ON u.id=s.user_id WHERE s.token=?""", (token,)).fetchone()
+        if not r:
+            return None
+        if (r["session_started"] or "") < cutoff:
+            c.execute("DELETE FROM sessions WHERE token=?", (token,))
+            return None
+        d = dict(r)
+        d.pop("session_started", None)
+        return d
+
+
+def purge_expired_sessions():
+    cutoff = (datetime.datetime.utcnow()
+              - datetime.timedelta(days=SESSION_TTL_DAYS)).isoformat(timespec="seconds")
+    with _conn() as c:
+        c.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff,))
 
 
 def delete_session(token):

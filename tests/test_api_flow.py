@@ -9,13 +9,17 @@ os.environ["CHAOS_DB"] = os.path.join(tempfile.mkdtemp(), "api.db")
 os.environ["CHAOS_SECRET_KEY"] = "test-key"
 os.environ["CHAOS_SECURE_COOKIES"] = "0"
 
-from fastapi.testclient import TestClient          # noqa: E402
-from chaos import db, demo, pipeline, scan          # noqa: E402
-from chaos.app import app                           # noqa: E402
+from fastapi.testclient import TestClient                    # noqa: E402
+from chaos import db, demo, pipeline, ratelimit, scan         # noqa: E402
+from chaos.app import app                                     # noqa: E402
 
 
 class ApiFlow(unittest.TestCase):
     def setUp(self):
+        # Every test here shares one client address; without a reset the limiter
+        # correctly refuses later tests. Rate limiting itself is covered in
+        # tests/test_security.py.
+        ratelimit.reset()
         self.c = TestClient(app)
 
     def _signup(self, email):
