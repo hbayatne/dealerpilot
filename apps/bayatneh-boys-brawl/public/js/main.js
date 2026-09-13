@@ -1,5 +1,5 @@
 /**
- * BONK BROS — app shell and screen router.
+ * BAYATNEH BOYS BRAWL — app shell and screen router.
  */
 
 import { blankCharacter, randomCharacter, renderGoof, renderHead, SPECIES } from './characters.js';
@@ -12,6 +12,7 @@ import { Party } from './net.js';
 import { h, clear, toast, overlay } from './ui.js';
 import { play, unlockAudio, setMuted, isMuted } from './sfx.js';
 import { canRecord } from './voice.js';
+import { playMusic, stopMusic, setMusicVolume } from './music.js';
 
 const app = document.getElementById('app');
 const party = new Party();
@@ -27,32 +28,67 @@ function needsCharacter() {
   return store.getCharacters().length === 0;
 }
 
+/** Music is off whenever everything is muted, or the music toggle is off. */
+function refreshMusicVolume() {
+  setMusicVolume(isMuted() || store.getSetting('musicOff') ? 0 : 0.22);
+}
+
 function muteButton() {
   const btn = h('button', { class: 'mini-btn' }, isMuted() ? '\u{1F507}' : '\u{1F50A}');
   btn.addEventListener('click', () => {
     const next = !isMuted();
     setMuted(next);
     store.setSetting('muted', next);
+    refreshMusicVolume();
     btn.textContent = next ? '\u{1F507}' : '\u{1F50A}';
+  });
+  return btn;
+}
+
+function musicButton() {
+  const label = () => (store.getSetting('musicOff') ? '\u{1F507}\u{1F3B5}' : '\u{1F3B5}');
+  const btn = h('button', { class: 'mini-btn music-btn' }, label());
+  btn.addEventListener('click', () => {
+    store.setSetting('musicOff', !store.getSetting('musicOff'));
+    refreshMusicVolume();
+    btn.textContent = label();
+    play('select');
   });
   return btn;
 }
 
 /* ------------------------------------------------------------------- title */
 
+/** Splits a word into per-letter spans so each one can animate on its own. */
+function letters(word, className) {
+  return h('span', { class: `word ${className}` },
+    [...word].map((ch, i) => h('span', { class: 'ltr', style: { '--i': String(i) } }, ch)));
+}
+
 function showTitle() {
   tearDown();
+  playMusic('menu');
+
   const heads = h('div', { class: 'floating-heads' });
   const saved = store.getCharacters();
-  for (let i = 0; i < Math.min(6, Math.max(3, saved.length)); i++) {
-    const character = saved[i % Math.max(1, saved.length)] || randomCharacter();
+  const pool = saved.length ? saved : [randomCharacter(), randomCharacter(), randomCharacter()];
+  for (let i = 0; i < Math.min(7, Math.max(4, pool.length * 2)); i++) {
+    const character = pool[i % pool.length];
     const head = h('div', {
       class: 'floating-head',
-      html: renderHead(character, ['idle', 'win', 'attack'][i % 3]),
+      html: renderHead(character, ['idle', 'win', 'attack', 'ko'][i % 4]),
       style: {
-        left: `${8 + (i * 15) % 84}%`,
-        animationDelay: `${i * 0.7}s`,
-        animationDuration: `${5 + (i % 3)}s`
+        left: `${6 + (i * 14.5) % 88}%`,
+        animationDelay: `${i * 1.1}s`,
+        animationDuration: `${7 + (i % 4) * 1.5}s`,
+        '--spin': `${i % 2 ? 1 : -1}`
+      },
+      // Poking a drifting head should do something. It always should.
+      onclick: (e) => {
+        play(['boing', 'pop', 'slap', 'fart'][Math.floor(Math.random() * 4)]);
+        e.currentTarget.classList.remove('is-poked');
+        void e.currentTarget.offsetWidth;
+        e.currentTarget.classList.add('is-poked');
       }
     });
     heads.append(head);
@@ -60,13 +96,26 @@ function showTitle() {
 
   clear(app).append(
     h('div', { class: 'screen title-screen' },
+      h('div', { class: 'hero-rays' }),
+      h('div', { class: 'hero-blobs' }, [0, 1, 2, 3, 4].map((i) =>
+        h('span', { class: `blob blob-${i}` }))),
       heads,
+      h('div', { class: 'title-controls' }, musicButton(), muteButton()),
       h('div', { class: 'title-block' },
-        h('h1', { class: 'logo' }, h('span', {}, 'BONK'), h('span', { class: 'logo-2' }, 'BROS')),
+        h('h1', { class: 'logo' },
+          letters('BAYATNEH', 'word-1'),
+          letters('BOYS', 'word-2'),
+          letters('BRAWL', 'word-3')),
         h('p', { class: 'tagline' }, 'Put your face on a goofball. Smack your brothers. Talk nonsense.'),
         h('button', {
           class: 'big-btn giant',
-          onclick: () => { unlockAudio(); play('boing'); needsCharacter() ? showWhoIsPlaying() : showHome(); }
+          onclick: () => {
+            unlockAudio();
+            playMusic('menu');
+            refreshMusicVolume();
+            play('boing');
+            needsCharacter() ? showWhoIsPlaying() : showHome();
+          }
         }, h('span', { class: 'big-btn-emoji' }, '\u{1F44A}'), needsCharacter() ? "Who's playing?" : 'PLAY'))));
 }
 
@@ -79,6 +128,7 @@ function showTitle() {
  */
 function showWhoIsPlaying() {
   tearDown();
+  playMusic('menu');
   const grid = h('div', { class: 'roster-grid' });
 
   for (const starter of STARTERS) {
@@ -124,6 +174,7 @@ async function pickStarter(starter) {
 
 function showHome() {
   tearDown();
+  playMusic('menu');
   const me = store.getActive();
   if (!me) return newCharacter();
 
@@ -131,7 +182,7 @@ function showHome() {
     h('div', { class: 'screen home' },
       h('header', { class: 'bar' },
         h('button', { class: 'mini-btn', onclick: showTitle }, '\u{2190}'),
-        h('h1', {}, 'BONK BROS'),
+        h('h1', {}, 'Bayatneh Boys'),
         muteButton()),
 
       h('div', { class: 'home-hero' },
@@ -159,6 +210,7 @@ function menuButton(emoji, title, sub, onClick) {
 
 function showRoster() {
   tearDown();
+  playMusic('menu');
   const grid = h('div', { class: 'roster-grid' });
   const active = store.getActive();
 
@@ -200,6 +252,7 @@ function newCharacter() {
 
 function editCharacter(character, isNew = false) {
   tearDown();
+  playMusic('menu');
   renderLab(app, {
     character,
     onSave: (saved) => {
@@ -217,6 +270,7 @@ function editCharacter(character, isNew = false) {
 
 function showTalk(character) {
   tearDown();
+  stopMusic();
   renderTalkBooth(app, { character, party, onBack: showHome });
 }
 
@@ -224,6 +278,7 @@ function showTalk(character) {
 
 function showCouchSetup() {
   tearDown();
+  playMusic('menu');
   const characters = store.getCharacters();
   if (characters.length < 2) {
     toast('Make one more goofball first!', '\u{1F465}');
@@ -297,6 +352,7 @@ function startBotFight() {
 
 function showParty() {
   tearDown();
+  playMusic('menu');
   const me = store.getActive();
 
   const codeInput = h('input', {
@@ -346,6 +402,7 @@ function showParty() {
 
 function showLobby() {
   tearDown();
+  playMusic('menu');
   const list = h('div', { class: 'lobby-list' });
   const startBtn = h('button', { class: 'big-btn' }, h('span', { class: 'big-btn-emoji' }, '\u{1F44A}'), 'FIGHT!');
   const waiting = h('p', { class: 'hint' }, 'Waiting for the host to start...');
@@ -438,6 +495,7 @@ function startFight({ entries, controls, isHost, party: net, replay, onExit }) {
 /* -------------------------------------------------------------------- boot */
 
 setMuted(Boolean(store.getSetting('muted')));
+refreshMusicVolume();
 
 document.addEventListener('pointerdown', function once() {
   unlockAudio();

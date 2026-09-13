@@ -41,7 +41,7 @@ execFileSync('openssl', [
   'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-days', '825',
   '-keyout', path.join(CERT_DIR, 'key.pem'),
   '-out', path.join(CERT_DIR, 'cert.pem'),
-  '-subj', '/CN=Bonk Bros',
+  '-subj', '/CN=Bayatneh Boys Brawl',
   '-addext', `subjectAltName=${names.join(',')}`
 ], { stdio: 'inherit' });
 

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * BONK BROS party server.
+ * BAYATNEH BOYS BRAWL party server.
  *
  * Two jobs, both small:
  *   1. Serve the static game out of ../public
@@ -233,7 +233,7 @@ server.listen(PORT, () => {
   const scheme = USE_HTTPS ? 'https' : 'http';
   const addresses = lanAddresses();
   console.log('');
-  console.log('  ####  BONK BROS is up  ####');
+  console.log('  ####  BAYATNEH BOYS BRAWL is up  ####');
   console.log('');
   console.log(`  This device : ${scheme}://localhost:${PORT}`);
   for (const ip of addresses) {
