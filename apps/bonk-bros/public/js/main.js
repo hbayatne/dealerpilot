@@ -3,6 +3,7 @@
  */
 
 import { blankCharacter, randomCharacter, renderGoof, renderHead, SPECIES } from './characters.js';
+import { STARTERS, loadStarterFace } from './starters.js';
 import * as store from './store.js';
 import { renderLab } from './lab.js';
 import { renderTalkBooth } from './talkbooth.js';
@@ -65,8 +66,58 @@ function showTitle() {
         h('p', { class: 'tagline' }, 'Put your face on a goofball. Smack your brothers. Talk nonsense.'),
         h('button', {
           class: 'big-btn giant',
-          onclick: () => { unlockAudio(); play('boing'); needsCharacter() ? newCharacter() : showHome(); }
-        }, h('span', { class: 'big-btn-emoji' }, '\u{1F44A}'), needsCharacter() ? 'Make my goofball' : 'PLAY'))));
+          onclick: () => { unlockAudio(); play('boing'); needsCharacter() ? showWhoIsPlaying() : showHome(); }
+        }, h('span', { class: 'big-btn-emoji' }, '\u{1F44A}'), needsCharacter() ? "Who's playing?" : 'PLAY'))));
+}
+
+/* ------------------------------------------------------------ who's playing */
+
+/**
+ * First run: offer the brothers as one-tap characters instead of dropping a
+ * five year old straight into a settings screen. Everything picked here is
+ * still editable afterwards, photo included.
+ */
+function showWhoIsPlaying() {
+  tearDown();
+  const grid = h('div', { class: 'roster-grid' });
+
+  for (const starter of STARTERS) {
+    const preview = blankCharacter({ ...starter, face: null });
+    grid.append(h('button', {
+      class: 'roster-card',
+      onclick: () => pickStarter(starter)
+    },
+      h('div', { class: 'roster-art', html: renderGoof(preview, { mood: 'idle' }) }),
+      h('div', { class: 'roster-name' }, starter.name),
+      h('div', { class: 'roster-sub' }, starter.face ? '\u{1F4F8} photo ready' : '\u{1F4F7} take a photo')));
+  }
+
+  grid.append(h('button', { class: 'roster-card is-new', onclick: newCharacter },
+    h('div', { class: 'roster-plus' }, '+'),
+    h('div', { class: 'roster-name' }, 'Somebody else')));
+
+  clear(app).append(
+    h('div', { class: 'screen' },
+      h('header', { class: 'bar' },
+        h('button', { class: 'mini-btn', onclick: showTitle }, '\u{2190}'),
+        h('h1', {}, "Who's playing?"),
+        muteButton()),
+      h('p', { class: 'hint' }, 'Tap your name. You can change absolutely everything afterwards.'),
+      grid));
+}
+
+async function pickStarter(starter) {
+  play('select');
+  const face = await loadStarterFace(starter);
+  const character = blankCharacter({ ...starter, face });
+  store.saveCharacter(character);
+  if (face) {
+    toast(`Hello ${character.name}!`, '\u{1F44B}');
+    showHome();
+  } else {
+    // No photo shipped for this one — go and take one.
+    editCharacter(character);
+  }
 }
 
 /* -------------------------------------------------------------------- home */
@@ -129,6 +180,10 @@ function showRoster() {
     h('div', { class: 'roster-plus' }, '+'),
     h('div', { class: 'roster-name' }, 'New goofball')));
 
+  grid.append(h('button', { class: 'roster-card is-new', onclick: showWhoIsPlaying },
+    h('div', { class: 'roster-plus' }, '\u{1F465}'),
+    h('div', { class: 'roster-name' }, 'The brothers')));
+
   clear(app).append(
     h('div', { class: 'screen' },
       h('header', { class: 'bar' },
@@ -152,10 +207,10 @@ function editCharacter(character, isNew = false) {
       toast(`${saved.name} is ready to rumble!`, '\u{1F44A}');
       showHome();
     },
-    onBack: () => (isNew && needsCharacter() ? showTitle() : showHome()),
+    onBack: () => (needsCharacter() ? showWhoIsPlaying() : showHome()),
     onDelete: isNew ? null : (id) => {
       store.deleteCharacter(id);
-      needsCharacter() ? showTitle() : showRoster();
+      needsCharacter() ? showWhoIsPlaying() : showRoster();
     }
   });
 }
