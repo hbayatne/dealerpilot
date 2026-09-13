@@ -84,6 +84,13 @@ long before being told off for something they were about to do.
 - **Entity merges.** Deterministic on email and phone; everything else is a
   *suggestion* a human confirms. A wrong silent merge fuses two customers'
   histories and is effectively unrecoverable for the user.
+- **Cost basis.** A DMS export names cost two ways: `VehicleCost` is acquisition
+  with `ReconCost` beside it, `TotalCost` already contains recon.
+  `dealercenter._should_add_recon` decides from the column name, the import
+  preview says which arithmetic it used, and the operator can overrule it —
+  because adding recon to a total overstates every unit and manufactures
+  negative-margin findings. The choice is stored on the integration so a later
+  export is costed the same way.
 
 ## Testing
 

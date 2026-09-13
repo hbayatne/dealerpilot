@@ -11,6 +11,10 @@ import tempfile
 import unittest
 
 os.environ.setdefault("CHAOS_DB", os.path.join(tempfile.mkdtemp(), "dc.db"))
+# The API test below drives the app through a client: cookies must survive plain
+# http, and importing the app must never start background work in a test run.
+os.environ.setdefault("CHAOS_SECURE_COOKIES", "0")
+os.environ.setdefault("CHAOS_DISABLE_SCHEDULER", "1")
 
 from chaos import db, demo_dealer, pipeline                       # noqa: E402
 from chaos.detect import crosssystem, inventory                   # noqa: E402
@@ -94,6 +98,84 @@ class Describe(unittest.TestCase):
         d = dc.describe(csv)
         self.assertEqual(d["coverage"]["with_cost"], 0)
         self.assertTrue(any("cost" in w.lower() for w in d["warnings"]))
+
+
+class CostBasis(unittest.TestCase):
+    """Whether recon is added on top of cost, or already inside it.
+
+    Getting this backwards does not produce a slightly wrong number — it moves
+    every margin in the product. Overstating cost invents negative-margin
+    findings, which is the expensive kind of wrong, so a column that names
+    itself a total is believed and anything else is treated as acquisition.
+    """
+
+    TOTAL_HEADER = HEADER.replace("VehicleCost", "TotalCost")
+
+    def test_acquisition_column_gets_recon_added(self):
+        csv = HEADER + "\n" + row("2018 PORSCHE MACAN", "CB1", "IN INVENTORY", "S1",
+                                  1, 20000, 0, 15000, 900, "01/01/2026", 0)
+        v = dc.parse(csv)[0]
+        self.assertEqual(v["cost_cents"], 1590000)
+        self.assertTrue(v["details"]["recon_added"])
+
+    def test_a_total_column_is_believed_as_a_total(self):
+        csv = self.TOTAL_HEADER + "\n" + row("2018 PORSCHE MACAN", "CB2", "IN INVENTORY",
+                                             "S2", 1, 20000, 0, 15000, 900, "01/01/2026", 0)
+        v = dc.parse(csv)[0]
+        self.assertEqual(v["cost_cents"], 1500000, "recon must not be double-counted")
+        self.assertFalse(v["details"]["recon_added"])
+
+    def test_the_operator_can_overrule_either_way(self):
+        csv = HEADER + "\n" + row("2018 PORSCHE MACAN", "CB3", "IN INVENTORY", "S3",
+                                  1, 20000, 0, 15000, 900, "01/01/2026", 0)
+        self.assertEqual(dc.parse(csv, add_recon=False)[0]["cost_cents"], 1500000)
+        total = self.TOTAL_HEADER + "\n" + row("2018 PORSCHE MACAN", "CB4", "IN INVENTORY",
+                                               "S4", 1, 20000, 0, 15000, 900, "01/01/2026", 0)
+        self.assertEqual(dc.parse(total, add_recon=True)[0]["cost_cents"], 1590000)
+
+    def test_describe_states_the_arithmetic_before_importing(self):
+        csv = HEADER + "\n" + row("2018 PORSCHE MACAN", "CB5", "IN INVENTORY", "S5",
+                                  1, 20000, 0, 15000, 900, "01/01/2026", 0)
+        cb = dc.describe(csv)["cost_basis"]
+        self.assertEqual((cb["cost_column"], cb["recon_column"]), ("VehicleCost", "ReconCost"))
+        self.assertTrue(cb["recon_added"])
+        self.assertIn("VehicleCost + ReconCost", cb["sentence"])
+        flipped = dc.describe(csv, add_recon=False)["cost_basis"]
+        self.assertFalse(flipped["recon_added"])
+        self.assertIn("already includes", flipped["sentence"])
+
+    def test_no_recon_column_is_said_plainly(self):
+        hdr = "VehicleInfo, Vin, InventoryStatus, AskingPrice, VehicleCost, DateInStock"
+        csv = hdr + "\n2018 PORSCHE MACAN, CB6, IN INVENTORY, 20000, 15000, 01/01/2026"
+        cb = dc.describe(csv)["cost_basis"]
+        self.assertIsNone(cb["recon_column"])
+        self.assertFalse(cb["recon_added"])
+        self.assertIn("No recon column", cb["sentence"])
+
+    def test_the_choice_is_remembered_across_uploads(self):
+        """A second export costed on a different basis would move every margin
+        in the product with no explanation. The first answer is kept."""
+        from fastapi.testclient import TestClient
+        from chaos import ratelimit
+        from chaos.app import app
+        ratelimit.reset()
+        c = TestClient(app)
+        c.post("/api/signup", json={"email": "recon@x.test", "password": "password1234",
+                                    "name": "R"})
+        oid = c.post("/api/orgs", json={"name": "Recon Motors",
+                                        "industry": "Automotive"}).json()["org"]["id"]
+        csv = HEADER + "\n" + row("2018 PORSCHE MACAN", "CB7", "IN INVENTORY", "S7",
+                                  1, 20000, 0, 15000, 900, "01/01/2026", 0)
+        r = c.post(f"/api/orgs/{oid}/inventory/import",
+                   json={"content": csv, "filename": "a.csv", "add_recon": False})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["cost_basis"]["recon_added"])
+        # A later upload that says nothing must not silently switch basis.
+        p = c.post(f"/api/orgs/{oid}/inventory/preview",
+                   json={"content": csv, "filename": "b.csv"}).json()["preview"]
+        self.assertFalse(p["cost_basis"]["recon_added"])
+        self.assertEqual(c.get(f"/api/orgs/{oid}/inventory").json()["vehicles"][0]["cost_cents"],
+                         1500000)
 
 
 class Storage(unittest.TestCase):

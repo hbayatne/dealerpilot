@@ -74,6 +74,10 @@ class InventoryIn(BaseModel):
     # four packages. A DealerCenter export is a few hundred KB of CSV.
     content: str
     filename: Optional[str] = None
+    # Whether recon cost is added on top of the cost column. None means "decide
+    # from the column name" (see dealercenter._should_add_recon); a dealer whose
+    # export disagrees sets it explicitly at import time.
+    add_recon: Optional[bool] = None
 
 
 class FeedbackIn(BaseModel):
@@ -371,6 +375,17 @@ def connect_mailbox(org_id: int, body: MailboxIn, user=Depends(current_user)):
     return {"ok": True, "detail": detail}
 
 
+def _recon_pref(org_id, body):
+    """The recon choice for this upload: what was asked for, else what was used
+    last time. Two exports of the same lot costed differently would move every
+    margin in the product without a word of explanation."""
+    if body.add_recon is not None:
+        return bool(body.add_recon)
+    saved = (db.integration(org_id, "dealercenter") or {}).get("config") or {}
+    v = saved.get("add_recon")
+    return None if v is None else bool(v)
+
+
 @app.post("/api/orgs/{org_id}/inventory/preview")
 def preview_inventory(org_id: int, body: InventoryIn, user=Depends(current_user)):
     """Show what we understood in this export — before importing anything.
@@ -382,7 +397,8 @@ def preview_inventory(org_id: int, body: InventoryIn, user=Depends(current_user)
     ctx = require_org(org_id, user)
     _need(ctx, "manager")
     try:
-        return {"preview": dealercenter.describe(body.content or "")}
+        return {"preview": dealercenter.describe(body.content or "",
+                                                 add_recon=_recon_pref(org_id, body))}
     except Exception as e:
         raise HTTPException(400, f"That file couldn't be read: {str(e)[:160]}")
 
@@ -392,8 +408,9 @@ def import_inventory(org_id: int, body: InventoryIn, user=Depends(current_user))
     """Import a DealerCenter export. Idempotent on VIN — re-uploading updates."""
     ctx = require_org(org_id, user)
     _need(ctx, "manager")
+    add_recon = _recon_pref(org_id, body)
     try:
-        rows = dealercenter.parse(body.content or "")
+        rows = dealercenter.parse(body.content or "", add_recon=add_recon)
     except Exception as e:
         raise HTTPException(400, f"That file couldn't be read: {str(e)[:160]}")
     if not rows:
@@ -403,14 +420,20 @@ def import_inventory(org_id: int, body: InventoryIn, user=Depends(current_user))
         _vid, is_new = db.upsert_vehicle(org_id, v)
         created += 1 if is_new else 0
         updated += 0 if is_new else 1
+    basis = dealercenter.describe(body.content or "", add_recon=add_recon)
     db.upsert_integration(org_id, "dealercenter", label=body.filename or "inventory export",
                           config={"last_file": body.filename,
-                                  "last_rows": len(rows)})
+                                  "last_rows": len(rows),
+                                  # Remembered so the next export is costed the
+                                  # same way, rather than silently switching
+                                  # basis and moving every margin figure.
+                                  "add_recon": add_recon})
     db.audit(org_id, user["id"], "inventory.import", f"org:{org_id}",
-             f"{created} new, {updated} updated from {body.filename or 'upload'}")
+             f"{created} new, {updated} updated from {body.filename or 'upload'} — "
+             f"{basis['cost_basis']['sentence']}")
     db.track("inventory_imported", org_id=org_id, user_id=user["id"], rows=len(rows))
     return {"imported": len(rows), "created": created, "updated": updated,
-            "coverage": dealercenter.describe(body.content or "")["coverage"]}
+            "cost_basis": basis["cost_basis"], "coverage": basis["coverage"]}
 
 
 @app.get("/api/orgs/{org_id}/inventory")

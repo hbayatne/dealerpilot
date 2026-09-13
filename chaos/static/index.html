@@ -785,17 +785,28 @@ function showUpload(){
 }
 window.showUpload=showUpload;
 
-let _pendingCsv=null, _pendingName=null;
+let _pendingCsv=null, _pendingName=null, _pendingRecon=null;
 async function pickFile(e){
   const file=e.target.files&&e.target.files[0];
   if(!file) return;
   $('#upOut').innerHTML=`<div style="margin-top:12px"><span class="spin"></span> Reading ${esc(file.name)}…</div>`;
-  const text=await file.text();
-  _pendingCsv=text; _pendingName=file.name;
+  _pendingCsv=await file.text(); _pendingName=file.name; _pendingRecon=null;
+  await runPreview();
+}
+window.pickFile=pickFile;
+
+// Re-previewing on a changed cost basis rather than only relabelling it: the
+// coverage counts and the sample rows have to agree with the arithmetic shown.
+async function setRecon(v){ _pendingRecon=v; await runPreview(); }
+window.setRecon=setRecon;
+
+async function runPreview(){
   try{
+    const body={content:_pendingCsv,filename:_pendingName};
+    if(_pendingRecon!==null) body.add_recon=_pendingRecon;
     const {preview:p}=await api(`/api/orgs/${State.org.id}/inventory/preview`,
-      {method:'POST',body:JSON.stringify({content:text,filename:file.name})});
-    const cov=p.coverage||{};
+      {method:'POST',body:JSON.stringify(body)});
+    const cov=p.coverage||{}, cb=p.cost_basis||{};
     $('#upOut').innerHTML=`
       <div class="${p.warnings&&p.warnings.length?'banner':'ok'}" style="margin-top:14px">
         Found <strong>${p.vehicles}</strong> vehicles in ${esc(p.format.toUpperCase())}.
@@ -803,6 +814,15 @@ async function pickFile(e){
         ${cov.with_date_in_stock} have a date in stock.
       </div>
       ${(p.warnings||[]).map(w=>`<div class="err" style="margin-top:8px">${esc(w)}</div>`).join('')}
+      ${cb.sentence?`<div class="small" style="margin-top:12px"><strong>How we read your money:</strong>
+        <span id="costBasis">${esc(cb.sentence)}</span></div>`:''}
+      ${cb.recon_column?`<div class="tiny muted" id="reconFlip" style="margin-top:6px">
+        Not how your export works?
+        <a href="#" onclick="setRecon(${cb.recon_added?'false':'true'});return false">
+        ${cb.recon_added
+          ? `My ${esc(cb.cost_column)} already has recon in it`
+          : `My recon is separate from ${esc(cb.cost_column)}`}</a> —
+        getting this backwards moves every margin we show you.</div>`:''}
       <div class="small muted" style="margin-top:12px">
         <strong>Columns we understood:</strong>
         ${Object.entries(p.understood||{}).map(([c,k])=>`${esc(c)} → ${esc(k)}`).join(' · ')||'none'}
@@ -815,15 +835,16 @@ async function pickFile(e){
       </div>`;
   }catch(err){ $('#upOut').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
 }
-window.pickFile=pickFile;
 
 async function doImport(btn){
   btn.disabled=true;
   $('#upOut').insertAdjacentHTML('beforeend',
     `<div id="impMsg" style="margin-top:12px"><span class="spin"></span> Importing…</div>`);
   try{
+    const ibody={content:_pendingCsv,filename:_pendingName};
+    if(_pendingRecon!==null) ibody.add_recon=_pendingRecon;
     const r=await api(`/api/orgs/${State.org.id}/inventory/import`,
-      {method:'POST',body:JSON.stringify({content:_pendingCsv,filename:_pendingName})});
+      {method:'POST',body:JSON.stringify(ibody)});
     $('#impMsg').innerHTML=`<div class="ok">Imported ${r.imported} vehicles
       (${r.created} new, ${r.updated} updated). Running a scan…</div>`;
     await api(`/api/orgs/${State.org.id}/scan`,{method:'POST'});
