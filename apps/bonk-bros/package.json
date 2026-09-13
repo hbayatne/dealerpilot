@@ -1,0 +1,17 @@
+{
+  "name": "bonk-bros",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A silly face-swap brawler for the Bayatne brothers. Put your face on a monkey, a footballer or a superhero and smack your brothers around.",
+  "type": "commonjs",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "start:https": "node server/index.js --https",
+    "cert": "node server/make-cert.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
