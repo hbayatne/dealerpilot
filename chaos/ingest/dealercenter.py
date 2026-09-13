@@ -67,6 +67,9 @@ _DETAIL_COLS = {
 # operator exactly which of their cost columns we found — and which we didn't.
 _COST_COLS = ("VehicleCost", "Cost", "UnitCost", "TotalCost", "ACV")
 _RECON_COST_COLS = ("ReconCost", "ReconditioningCost", "RepairCost", "TotalReconCost")
+# Cost columns that already have recon folded in, by the meaning of their name.
+# Everything else in _COST_COLS is an acquisition figure with recon beside it.
+_TOTAL_COST_COLS = ("TotalCost",)
 _PRICE_COLS = ("SpecialPrice", "AdvertisingPrice", "AskingPrice", "VehiclePrice",
                "InternetPrice", "ListPrice", "RetailPrice")
 _FLOORING_COLS = ("ActualFlooringCost", "EstimatedFlooringCost", "FlooringCost")
@@ -174,7 +177,47 @@ def _details(row):
     return out
 
 
-def map_row(row):
+def _should_add_recon(cost_col, add_recon=None):
+    """Is recon separate from the cost column we found, or already inside it?
+
+    A dealer's "cost" means what is tied up in the unit: what it was bought for
+    plus what it took to make it frontline. Exports say that two ways —
+    `VehicleCost` is acquisition with `ReconCost` in its own column, while
+    `TotalCost` already contains recon. Adding recon to a total overstates every
+    unit and manufactures negative-margin findings, which is the expensive kind
+    of wrong, so the column name decides and the import says out loud what it
+    did. `add_recon` lets an operator whose export disagrees overrule that.
+    """
+    if add_recon is not None:
+        return bool(add_recon)
+    return cost_col not in _TOTAL_COST_COLS
+
+
+def cost_basis(columns, add_recon=None):
+    """Which columns the money comes from, and whether recon was added.
+
+    Returned by `describe` so the operator sees the arithmetic before importing
+    rather than reverse-engineering it from a dashboard.
+    """
+    cost_col = next((c for c in _COST_COLS if c in columns), None)
+    recon_col = next((c for c in _RECON_COST_COLS if c in columns), None)
+    added = bool(recon_col) and _should_add_recon(cost_col, add_recon)
+    if not cost_col:
+        sentence = "No cost column found, so cost is unknown for every unit."
+    elif not recon_col:
+        sentence = f"Cost is {cost_col}. No recon column in this export."
+    elif added:
+        sentence = (f"Cost is {cost_col} + {recon_col} — we are treating {cost_col} "
+                    f"as what you paid, with recon on top.")
+    else:
+        sentence = (f"Cost is {cost_col} alone — we are treating it as a total that "
+                    f"already includes {recon_col}.")
+    return {"cost_column": cost_col, "recon_column": recon_col,
+            "recon_added": added, "explicit": add_recon is not None,
+            "sentence": sentence}
+
+
+def map_row(row, add_recon=None):
     """One header-keyed CSV row → a vehicle dict, or None when unusable."""
     vin = (row.get("Vin") or row.get("VIN") or "").strip().upper()
     info = row.get("VehicleInfo") or ""
@@ -188,7 +231,8 @@ def map_row(row):
     model = model or (row.get("Model") or "").strip() or None
 
     cost_cents, cost_col = _first_cents(row, _COST_COLS)
-    recon_cents, _ = _first_cents(row, _RECON_COST_COLS)
+    recon_cents, recon_col = _first_cents(row, _RECON_COST_COLS)
+    add_recon_here = _should_add_recon(cost_col, add_recon)
     flooring_cents, _ = _first_cents(row, _FLOORING_COLS)
     mileage = _num(row.get("Mileage") or row.get("Odometer"))
 
@@ -197,6 +241,7 @@ def map_row(row):
         details["recon_cost_cents"] = recon_cents
     if cost_col:
         details["cost_column"] = cost_col
+        details["recon_added"] = bool(recon_cents is not None and add_recon_here)
 
     return {
         "source": "dealercenter",
@@ -205,10 +250,10 @@ def map_row(row):
         "year": year, "make": make, "model": model, "trim": trim,
         "mileage": int(mileage) if mileage is not None else None,
         "price_cents": _price_cents(row),
-        # Total cost carried: acquisition plus recon. That total is what is
-        # actually tied up in the unit, and it is what a dealer means by "cost".
+        # What is actually tied up in the unit. Recon is added only when the
+        # cost column is an acquisition figure — see `_should_add_recon`.
         "cost_cents": (None if cost_cents is None
-                       else cost_cents + (recon_cents or 0)),
+                       else cost_cents + ((recon_cents or 0) if add_recon_here else 0)),
         "flooring_cents": flooring_cents,
         "status": _STATUS.get((row.get("InventoryStatus") or "").strip().upper(), "frontline"),
         "date_in_stock": _date(row.get("DateInStock") or row.get("StockDate")),
@@ -223,7 +268,7 @@ def _sniff(text):
     return max(counts, key=counts.get) if any(counts.values()) else ","
 
 
-def parse_csv(text):
+def parse_csv(text, add_recon=None):
     """Parse a DealerCenter CSV/TSV export. Delimiter is auto-detected and
     headers are stripped, because real exports arrive with leading spaces."""
     if not text or not text.strip():
@@ -240,7 +285,7 @@ def parse_csv(text):
             continue
         row = {header[i]: (raw[i].strip() if i < len(raw) else "")
                for i in range(len(header))}
-        v = map_row(row)
+        v = map_row(row, add_recon=add_recon)
         if v:
             out.append(v)
     return out
@@ -288,12 +333,14 @@ def parse_xml(text):
     return out
 
 
-def parse(text):
+def parse(text, add_recon=None):
     """Parse whichever format the export arrived in."""
-    return parse_xml(text) if (text or "").lstrip().startswith("<") else parse_csv(text)
+    if (text or "").lstrip().startswith("<"):
+        return parse_xml(text)
+    return parse_csv(text, add_recon=add_recon)
 
 
-def describe(text, sample=3):
+def describe(text, sample=3, add_recon=None):
     """What is in this file, before importing anything.
 
     An operator handing us their export should see which of their columns we
@@ -304,7 +351,7 @@ def describe(text, sample=3):
     if not t:
         return {"ok": False, "error": "That file was empty."}
     is_xml = t.startswith("<")
-    vehicles = parse(text)
+    vehicles = parse(text, add_recon=add_recon)
     columns = []
     if not is_xml:
         delim = _sniff(text)
@@ -341,6 +388,7 @@ def describe(text, sample=3):
     return {
         "ok": True,
         "format": "xml" if is_xml else "csv",
+        "cost_basis": cost_basis(columns, add_recon),
         "vehicles": len(vehicles),
         "columns": columns,
         "understood": known,
