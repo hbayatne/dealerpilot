@@ -35,6 +35,17 @@ Type the second one into Safari or Chrome on each kid's device. No app store, no
 accounts, no sign-in. On iOS, **Share → Add to Home Screen** makes it open
 fullscreen like a real app.
 
+## First run
+
+The opening screen asks **Who's playing?** and offers Waleed, Tamer and Ameen
+as one-tap characters. Waleed and Tamer already have their faces on (cropped
+from the dodgeball photo); Ameen goes straight to the Face Booth so he can take
+his own. Everything about a starter is editable afterwards, photo included, and
+"Somebody else" builds one from scratch.
+
+To change who the starters are, edit `public/js/starters.js` and drop matching
+crops into `public/faces/`.
+
 ## Playing together
 
 - **Party fight** — one kid taps *Start a new party* and reads out the four
@@ -79,13 +90,19 @@ voices.
 
 ## Where the kids' photos go
 
-Photos are cropped in the browser and kept in that device's own local storage.
-They are never uploaded, never written to disk on the server, and never leave
-your wifi. When a kid joins a party their character (including the cropped
-face) is passed to the other players in the room so it can be drawn on their
-screens, and it is dropped as soon as everyone disconnects.
+Two cropped photos ship with the game, in `public/faces/`, so Waleed and Tamer
+can start playing without doing anything. Those two are committed to this
+repository. Delete the files and blank the `face` fields in
+`public/js/starters.js` if you would rather they weren't.
 
-Deleting a goofball in *My goofballs* deletes the photo with it.
+Every other photo — anything taken in the Face Booth — is cropped in the
+browser and kept in that device's own local storage. It is never uploaded,
+never written to disk on the server, and never leaves your wifi. When a kid
+joins a party their character (including the face) is passed to the other
+players in the room so it can be drawn on their screens, and it is dropped as
+soon as everyone disconnects.
+
+Deleting a goofball in *My goofballs* deletes its photo with it.
 
 ## Layout
 
@@ -95,9 +112,11 @@ server/
   make-cert.js   self-signed certificate for the microphone
 public/
   index.html
+  faces/         the two cropped starter photos
   css/style.css
   js/
-    main.js        screen router: title, home, roster, party, lobby
+    main.js        screen router: title, who's playing, home, roster, party
+    starters.js    the ready-made brothers
     characters.js  the character model and all of the SVG artwork
     fight.js       the rules — health, moves, cooldowns, silly events
     arena.js       the fight screen: animation, effects, control pads
