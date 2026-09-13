@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#16123a"/>
+  <circle cx="256" cy="230" r="150" fill="#ffd93d" stroke="#14142a" stroke-width="18"/>
+  <ellipse cx="200" cy="205" rx="30" ry="35" fill="#fff" stroke="#14142a" stroke-width="8"/>
+  <ellipse cx="312" cy="205" rx="30" ry="35" fill="#fff" stroke="#14142a" stroke-width="8"/>
+  <circle cx="204" cy="212" r="14" fill="#14142a"/>
+  <circle cx="308" cy="212" r="14" fill="#14142a"/>
+  <path d="M186 285 q70 60 140 0 z" fill="#5c1d1d" stroke="#14142a" stroke-width="8" stroke-linejoin="round"/>
+  <text x="256" y="470" text-anchor="middle" font-family="Impact, sans-serif" font-size="96" fill="#ff5757" stroke="#14142a" stroke-width="8" paint-order="stroke">BONK</text>
+</svg>
