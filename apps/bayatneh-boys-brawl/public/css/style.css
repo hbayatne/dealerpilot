@@ -1,5 +1,5 @@
 /* ============================================================
-   BONK BROS
+   BAYATNEH BOYS BRAWL
    Chunky, loud and finger-friendly. Everything is sized for a
    kid poking at an iPad, so nothing tappable is under 56px.
    ============================================================ */
@@ -53,6 +53,7 @@ body::before {
 #app { height: 100%; }
 
 .screen {
+  animation: screen-in 0.3s ease-out;
   height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -72,6 +73,11 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 .hint.small { font-size: 12px; }
 
 /* ----------------------------------------------------------------- chrome */
+
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
 
 .bar {
   display: grid;
@@ -142,35 +148,171 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 
 /* ------------------------------------------------------------ title screen */
 
-.title-screen { justify-content: center; align-items: center; position: relative; }
+.title-screen {
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
 
-.title-block { text-align: center; display: flex; flex-direction: column; gap: 18px; z-index: 2; width: min(440px, 100%); }
+/* Slowly turning comic rays behind everything. One element, one transform,
+   so it stays cheap enough for an old iPad. */
+.hero-rays {
+  position: absolute;
+  top: -40%;
+  left: 50%;
+  width: 180vmax;
+  height: 180vmax;
+  margin-left: -90vmax;
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0.055) 0deg 7deg,
+    transparent 7deg 14deg);
+  animation: rays-spin 48s linear infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: 0;
+}
+@keyframes rays-spin { to { transform: rotate(360deg); } }
+
+.hero-blobs { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(28px);
+  opacity: 0.5;
+  animation: blob-drift 17s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.blob-0 { width: 46vmin; height: 46vmin; left: -12%; top: 8%;  background: #ff5757; }
+.blob-1 { width: 38vmin; height: 38vmin; right: -10%; top: 2%; background: #ffd93d; animation-duration: 21s; }
+.blob-2 { width: 52vmin; height: 52vmin; left: 20%; bottom: -18%; background: #4d8bff; animation-duration: 25s; }
+.blob-3 { width: 30vmin; height: 30vmin; right: 6%; bottom: 4%;  background: #3ddc97; animation-duration: 19s; }
+.blob-4 { width: 26vmin; height: 26vmin; left: 46%; top: 34%;   background: #ff77c6; animation-duration: 23s; }
+@keyframes blob-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6vmin, -7vmin, 0) scale(1.25); }
+}
+
+.title-controls {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+.music-btn { font-size: 15px; }
+
+.title-block {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  z-index: 3;
+  width: min(560px, 100%);
+}
+
+/* ---- the lettering ---- */
 
 .logo {
   font-family: var(--display);
-  font-size: clamp(52px, 17vw, 104px);
-  line-height: 0.86;
+  /* Impact's glyph box is taller than its caps; anything under 1 here and the
+     three words collide once the wave animation starts moving them. */
+  line-height: 1;
   display: flex;
   flex-direction: column;
-  color: var(--yellow);
-  text-shadow: 5px 5px 0 var(--ink), -2px -2px 0 var(--ink), 0 0 34px rgba(255,217,61,0.45);
-  transform: rotate(-3deg);
-  animation: logo-wobble 3.2s ease-in-out infinite;
+  align-items: center;
+  gap: 4px;
+  perspective: 600px;
 }
-.logo-2 { color: var(--red); text-shadow: 5px 5px 0 var(--ink); }
-@keyframes logo-wobble {
-  0%, 100% { transform: rotate(-3deg) scale(1); }
-  50% { transform: rotate(2deg) scale(1.03); }
+.logo .word { display: flex; }
+.logo .ltr {
+  display: inline-block;
+  /* Each letter drops in, then joins a rolling wave. Both delays key off --i
+     so the whole word reads left to right. */
+  animation:
+    letter-drop 0.6s cubic-bezier(0.2, 1.5, 0.4, 1) both,
+    letter-wave 2.6s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.06s), calc(1s + var(--i) * 0.08s);
+  will-change: transform;
 }
 
-.tagline { margin: 0; font-size: 15px; opacity: 0.85; line-height: 1.5; }
+.word-1 .ltr { font-size: clamp(34px, 11.5vw, 76px); color: var(--yellow); }
+.word-2 .ltr { font-size: clamp(40px, 14vw, 92px); color: #4de3ff; }
+.word-3 .ltr { font-size: clamp(46px, 16vw, 108px); color: var(--red); }
 
-.floating-heads { position: absolute; inset: 0; overflow: hidden; z-index: 1; pointer-events: none; }
-.floating-head { position: absolute; width: 90px; opacity: 0.5; animation: drift linear infinite; }
-.floating-head svg { width: 100%; }
+.logo .ltr {
+  text-shadow:
+    3px 3px 0 var(--ink), -3px 3px 0 var(--ink), 3px -3px 0 var(--ink), -3px -3px 0 var(--ink),
+    0 7px 0 rgba(0, 0, 0, 0.45);
+  letter-spacing: 1px;
+}
+.word-2 { transform: rotate(-2deg); }
+.word-3 { transform: rotate(1.5deg); }
+
+@keyframes letter-drop {
+  from { transform: translateY(-130%) rotate(-25deg) scale(0.4); opacity: 0; }
+  60%  { transform: translateY(8%) rotate(6deg) scale(1.12); opacity: 1; }
+  to   { transform: translateY(0) rotate(0) scale(1); opacity: 1; }
+}
+@keyframes letter-wave {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25%      { transform: translateY(-6px) rotate(-3deg); }
+  55%      { transform: translateY(1.5px) rotate(2deg); }
+}
+
+.tagline {
+  margin: 0;
+  font-size: clamp(13px, 3.6vw, 16px);
+  opacity: 0.9;
+  line-height: 1.5;
+  animation: fade-up 0.7s 0.9s both;
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 0.9; transform: none; }
+}
+
+/* The invitation pulse glows rather than resizes. A button that never stops
+   moving is a moving tap target, which is exactly what a small child does not
+   need — and it makes the button impossible to click reliably in tests. */
+.title-screen .big-btn.giant {
+  animation: fade-up 0.7s 1.15s both, btn-glow 2.2s 1.9s ease-in-out infinite;
+}
+@keyframes btn-glow {
+  0%, 100% {
+    box-shadow: var(--shadow), 0 0 0 rgba(255, 217, 61, 0);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: var(--shadow), 0 0 30px 6px rgba(255, 217, 61, 0.45);
+    filter: brightness(1.12);
+  }
+}
+
+/* ---- drifting heads ---- */
+
+.floating-heads { position: absolute; inset: 0; overflow: hidden; z-index: 2; }
+.floating-head {
+  position: absolute;
+  width: clamp(64px, 17vw, 104px);
+  opacity: 0.42;
+  animation: drift linear infinite;
+  will-change: transform;
+  cursor: pointer;
+}
+.floating-head svg { width: 100%; pointer-events: none; }
+.floating-head.is-poked { animation: drift linear infinite, poked 0.5s ease-out; }
 @keyframes drift {
-  from { transform: translateY(110vh) rotate(-20deg); }
-  to { transform: translateY(-30vh) rotate(20deg); }
+  from { transform: translateY(115vh) rotate(calc(var(--spin, 1) * -25deg)); }
+  to   { transform: translateY(-40vh) rotate(calc(var(--spin, 1) * 25deg)); }
+}
+@keyframes poked {
+  0%   { filter: none; }
+  30%  { filter: drop-shadow(0 0 16px var(--yellow)) brightness(1.5); }
+  100% { filter: none; }
 }
 
 /* -------------------------------------------------------------- home menu */
@@ -185,12 +327,32 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
   border-radius: var(--round);
   padding: 12px;
 }
-.home-art svg { width: 100%; height: auto; max-height: 190px; }
+.home-art svg {
+  width: 100%; height: auto; max-height: 190px;
+  animation: home-bob 2.8s ease-in-out infinite;
+}
+@keyframes home-bob {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  50%      { transform: translateY(-9px) rotate(1.5deg); }
+}
 .home-meta { display: flex; flex-direction: column; gap: 8px; }
 .home-name { font-family: var(--display); font-size: 24px; }
 .home-species { font-size: 14px; opacity: 0.75; margin-bottom: 4px; }
 
 .menu { display: flex; flex-direction: column; gap: 10px; }
+.menu-btn { animation: card-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.menu-btn:nth-child(1) { animation-delay: 0.04s; }
+.menu-btn:nth-child(2) { animation-delay: 0.11s; }
+.menu-btn:nth-child(3) { animation-delay: 0.18s; }
+.menu-btn:nth-child(4) { animation-delay: 0.25s; }
+.menu-btn:nth-child(5) { animation-delay: 0.32s; }
+.menu-emoji { transition: transform 0.2s cubic-bezier(0.2, 1.6, 0.4, 1); }
+.menu-btn:active .menu-emoji { transform: scale(1.35) rotate(-12deg); }
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(22px) scale(0.94); }
+  to   { opacity: 1; transform: none; }
+}
 .menu-btn {
   display: flex;
   align-items: center;
@@ -217,6 +379,7 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 .roster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .roster-grid.small { grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); }
 .roster-card {
+  animation: card-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both;
   position: relative;
   border: 4px solid var(--ink);
   border-radius: var(--round);
@@ -226,7 +389,20 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
   cursor: pointer;
   font-family: var(--body);
 }
-.roster-card.is-on { background: var(--yellow); color: var(--ink); box-shadow: var(--shadow); }
+.roster-card:nth-child(1) { animation-delay: 0.03s; }
+.roster-card:nth-child(2) { animation-delay: 0.09s; }
+.roster-card:nth-child(3) { animation-delay: 0.15s; }
+.roster-card:nth-child(4) { animation-delay: 0.21s; }
+.roster-card:nth-child(n+5) { animation-delay: 0.27s; }
+.roster-card:active { transform: scale(0.96); }
+.roster-card.is-on {
+  background: var(--yellow); color: var(--ink); box-shadow: var(--shadow);
+  animation: card-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both, chosen-wobble 2.4s ease-in-out infinite 0.5s;
+}
+@keyframes chosen-wobble {
+  0%, 100% { transform: rotate(-1deg); }
+  50%      { transform: rotate(1deg); }
+}
 .roster-card.is-new { display: grid; place-items: center; min-height: 170px; border-style: dashed; }
 .roster-plus { font-size: 46px; font-family: var(--display); }
 .roster-art svg { width: 100%; height: 132px; }
@@ -293,7 +469,17 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
   cursor: pointer;
   font-family: var(--body);
 }
-.chip.is-on { background: var(--yellow); color: var(--ink); box-shadow: 0 4px 0 rgba(0,0,0,0.35); }
+.chip { transition: transform 0.15s cubic-bezier(0.2, 1.6, 0.4, 1); }
+.chip:active { transform: scale(0.9); }
+.chip.is-on {
+  background: var(--yellow); color: var(--ink); box-shadow: 0 4px 0 rgba(0,0,0,0.35);
+  animation: chip-pop 0.35s cubic-bezier(0.2, 1.7, 0.4, 1);
+}
+@keyframes chip-pop {
+  0%  { transform: scale(0.8); }
+  55% { transform: scale(1.15); }
+  to  { transform: scale(1); }
+}
 .chip-emoji { font-size: 24px; line-height: 1; }
 .chip-label { font-size: 11px; text-align: center; line-height: 1.15; }
 .swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--ink); display: block; }

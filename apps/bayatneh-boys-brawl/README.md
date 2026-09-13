@@ -1,4 +1,4 @@
-# BONK BROS
+# BAYATNEH BOYS BRAWL
 
 A silly face-swap brawler for Waleed, Tamer and Ameen.
 
@@ -19,7 +19,7 @@ You need Node 18 or newer on a laptop or desktop that stays on the same wifi as
 the kids' devices.
 
 ```bash
-cd apps/bonk-bros
+cd apps/bayatneh-boys-brawl
 npm install
 npm start
 ```
@@ -124,6 +124,7 @@ public/
     talkbooth.js   Talk Booth
     voice.js       recording, pitch shifting, speech
     sfx.js         every sound effect, generated with the Web Audio API
+    music.js       three looping chiptunes, also generated at runtime
     net.js         websocket client and room protocol
     store.js       local storage
     ui.js          small DOM helpers
@@ -131,6 +132,22 @@ public/
 
 There are no build steps and no front-end dependencies. `ws` on the server is
 the only package.
+
+### Sound and music
+
+Every sound in the game is generated at runtime with the Web Audio API — the
+slaps and farts in `sfx.js`, and the three looping chiptunes in `music.js` (one
+for the menus, one for the arena, one for the winner screen). There are no
+audio files anywhere in the project.
+
+The music runs on a lookahead scheduler that queues notes against the audio
+clock a fraction of a second early, because `setInterval` alone drifts badly —
+and phones throttle it hard the moment the screen dims. Tracks are written as
+32-step patterns, so a new one is a couple of dozen lines of note names.
+
+Music stops entirely in the Talk Booth and ducks while the TAUNT button is
+recording, so it never bleeds into a recording. The 🎵 button on the title
+screen turns it off for good; the 🔊 button silences everything.
 
 ### Adding a new move
 

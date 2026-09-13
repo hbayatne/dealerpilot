@@ -1,8 +1,8 @@
 {
-  "name": "bonk-bros",
+  "name": "bayatneh-boys-brawl",
   "version": "1.0.0",
   "private": true,
-  "description": "A silly face-swap brawler for the Bayatne brothers. Put your face on a monkey, a footballer or a superhero and smack your brothers around.",
+  "description": "A silly face-swap brawler for the Bayatneh boys. Put your face on a monkey, a footballer or a superhero and smack your brothers around.",
   "type": "commonjs",
   "main": "server/index.js",
   "scripts": {

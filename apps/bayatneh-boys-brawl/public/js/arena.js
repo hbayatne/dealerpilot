@@ -12,6 +12,7 @@ import { Fight, movesFor, readSnapshot } from './fight.js';
 import { h, clear, popText, confetti, shake, toast } from './ui.js';
 import { play } from './sfx.js';
 import { playClip, speak, startRecording, blobToDataUrl, canRecord } from './voice.js';
+import { playMusic, duckMusic } from './music.js';
 
 const COMMENTARY = [
   'Ooooooh that had to sting!',
@@ -70,6 +71,8 @@ export class Arena {
     }
 
     if (this.party) this.wireParty();
+
+    playMusic('fight');
 
     this.lastFrame = performance.now();
     this.lastPush = 0;
@@ -204,9 +207,11 @@ export class Arena {
         if (!canRecord()) return;
         try {
           recording = true;
+          duckMusic(true);
           button.classList.add('is-recording');
           recorder = await startRecording(async (blob) => {
             recording = false;
+            duckMusic(false);
             button.classList.remove('is-recording');
             if (!blob) return;
             const clip = await blobToDataUrl(blob);
@@ -214,6 +219,7 @@ export class Arena {
           });
         } catch {
           recording = false;
+          duckMusic(false);
           button.classList.remove('is-recording');
           toast('The microphone said no.', '\u{1F3A4}');
         }
@@ -231,7 +237,7 @@ export class Arena {
 
     button.addEventListener('pointerdown', startHold);
     button.addEventListener('pointerup', endHold);
-    button.addEventListener('pointercancel', () => { clearTimeout(holdTimer); recorder?.stop(); });
+    button.addEventListener('pointercancel', () => { clearTimeout(holdTimer); duckMusic(false); recorder?.stop(); });
   }
 
   /* ------------------------------------------------------------- networking */
@@ -544,6 +550,7 @@ export class Arena {
 
   showResult(winnerId) {
     const winner = winnerId ? this.charactersById[winnerId] : null;
+    playMusic('victory');
     play(this.controls.includes(winnerId) ? 'cheer' : 'ding');
 
     const panel = h('div', { class: 'result' },

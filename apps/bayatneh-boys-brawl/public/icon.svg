@@ -6,5 +6,5 @@
   <circle cx="204" cy="212" r="14" fill="#14142a"/>
   <circle cx="308" cy="212" r="14" fill="#14142a"/>
   <path d="M186 285 q70 60 140 0 z" fill="#5c1d1d" stroke="#14142a" stroke-width="8" stroke-linejoin="round"/>
-  <text x="256" y="470" text-anchor="middle" font-family="Impact, sans-serif" font-size="96" fill="#ff5757" stroke="#14142a" stroke-width="8" paint-order="stroke">BONK</text>
+  <text x="256" y="470" text-anchor="middle" font-family="Impact, sans-serif" font-size="104" fill="#ff5757" stroke="#14142a" stroke-width="8" paint-order="stroke">BBB</text>
 </svg>
