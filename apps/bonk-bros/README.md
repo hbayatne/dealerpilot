@@ -38,10 +38,9 @@ fullscreen like a real app.
 ## First run
 
 The opening screen asks **Who's playing?** and offers Waleed, Tamer and Ameen
-as one-tap characters. Waleed and Tamer already have their faces on (cropped
-from the dodgeball photo); Ameen goes straight to the Face Booth so he can take
-his own. Everything about a starter is editable afterwards, photo included, and
-"Somebody else" builds one from scratch.
+as one-tap characters, each with their face already on. Everything about a
+starter is editable afterwards, photo included, and "Somebody else" builds one
+from scratch.
 
 To change who the starters are, edit `public/js/starters.js` and drop matching
 crops into `public/faces/`.
@@ -90,8 +89,8 @@ voices.
 
 ## Where the kids' photos go
 
-Two cropped photos ship with the game, in `public/faces/`, so Waleed and Tamer
-can start playing without doing anything. Those two are committed to this
+Three cropped photos ship with the game, in `public/faces/`, so the boys can
+start playing without doing anything. Those three are committed to this
 repository. Delete the files and blank the `face` fields in
 `public/js/starters.js` if you would rather they weren't.
 
@@ -112,7 +111,7 @@ server/
   make-cert.js   self-signed certificate for the microphone
 public/
   index.html
-  faces/         the two cropped starter photos
+  faces/         the three cropped starter photos
   css/style.css
   js/
     main.js        screen router: title, who's playing, home, roster, party
