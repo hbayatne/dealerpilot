@@ -28,12 +28,12 @@ export const STARTERS = [
     skin: '#a9743f',
     hat: 'cap',
     voice: 'chipmunk',
-    headSize: 'huge',
+    headSize: 'big',
     catchphrase: 'Ooh ooh aah aah, you smell like a banana!'
   },
   {
     name: 'Ameen',
-    face: null,
+    face: 'faces/ameen.jpg',
     species: 'superhero',
     outfit: '#8b2fd6',
     hat: 'crown',
