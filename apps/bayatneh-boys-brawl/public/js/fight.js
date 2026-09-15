@@ -35,10 +35,19 @@ export function movesFor(speciesId) {
 }
 
 const START_HP = 140;
+const DIZZY_MS = 3200;        // how long a bonked fighter sits out in a rumble
+export const DEFAULT_TARGET_SCORE = 5;
 const BLOCK_DRAIN = 48;      // stamina per second while holding block
 const STAMINA_REGEN = 24;    // stamina per second otherwise
 const BLOCK_HIT_COST = 16;   // extra stamina for actually soaking a hit
 const BLOCK_REDUCTION = 0.25;
+const SILLY_GLOBAL_MS = 7000;  // how long a whole-arena silly event lasts
+
+/** Everybody shuffles one seat along, so nobody keeps their own face. */
+function faceSwapMap(players) {
+  const ids = players.map((p) => p.id);
+  return Object.fromEntries(ids.map((id, i) => [id, ids[(i + 1) % ids.length]]));
+}
 
 export const SILLY_EVENTS = [
   { id: 'banana', emoji: '\u{1F34C}', text: '{name} slipped on a banana peel!', damage: 6, sfx: 'boing', stun: 500 },
@@ -47,7 +56,16 @@ export const SILLY_EVENTS = [
   { id: 'tickle', emoji: '\u{1FAB6}', text: 'A feather is tickling {name}!', stun: 1600, sfx: 'pop' },
   { id: 'bigheads', emoji: '\u{1F388}', text: 'BIG HEAD STORM! Everybody inflates!', global: 'bigheads', sfx: 'boing' },
   { id: 'sock', emoji: '\u{1F9E6}', text: 'A smelly sock landed on {name}. Gross.', damage: 8, sfx: 'splat', stun: 300 },
-  { id: 'slowmo', emoji: '\u{1F40C}', text: 'SLOW MOTION! Everything goes floppy!', global: 'slowmo', sfx: 'boing' }
+  { id: 'slowmo', emoji: '\u{1F40C}', text: 'SLOW MOTION! Everything goes floppy!', global: 'slowmo', sfx: 'boing' },
+  { id: 'faceswap', emoji: '\u{1F504}', text: 'FACE SWAP! Nobody knows who they are!', global: 'faceswap', sfx: 'boing', needs: 2 },
+  { id: 'bananarain', emoji: '\u{1F34C}', text: 'BANANA RAIN! It is raining bananas!', global: 'bananarain', sfx: 'boing' },
+  { id: 'upsidedown', emoji: '\u{1F643}', text: 'EVERYBODY IS UPSIDE DOWN! Why?!', global: 'upsidedown', sfx: 'boing' },
+  { id: 'bee', emoji: '\u{1F41D}', text: 'A bee is chasing {name}!', damage: 4, stun: 900, sfx: 'pop' },
+  { id: 'broccoli', emoji: '\u{1F966}', text: '{name} had to eat broccoli. Yuck.', damage: 5, sfx: 'splat', stun: 400 },
+  { id: 'nap', emoji: '\u{1F634}', text: '{name} fell asleep standing up!', stun: 1800, sfx: 'boing' },
+  { id: 'juice', emoji: '\u{1F9C3}', text: '{name} chugged a juice box. Zoom!', heal: 15, sfx: 'ding' },
+  { id: 'gum', emoji: '\u{1FAE7}', text: '{name} stepped in bubble gum. Stuck!', stun: 1400, sfx: 'splat' },
+  { id: 'wedgie', emoji: '\u{1FA72}', text: 'A ghost gave {name} a wedgie!', damage: 7, stun: 600, sfx: 'slap' }
 ];
 
 let fxSeq = 0;
@@ -58,7 +76,12 @@ export class Fight {
    * @param {{sillyEvents?:boolean}} [options]
    */
   constructor(entries, options = {}) {
-    this.options = { sillyEvents: true, ...options };
+    // 'elimination' is last-one-standing. 'rumble' never removes anybody: a
+    // fighter on zero goes dizzy for a few seconds, the bonker scores a point,
+    // and then they pop back up. With a five year old in the game that matters
+    // more than it sounds — nobody ends up watching their brothers play.
+    this.options = { sillyEvents: true, mode: 'elimination', targetScore: DEFAULT_TARGET_SCORE, ...options };
+    this.rumble = this.options.mode === 'rumble';
     this.phase = 'countdown';
     this.countdown = 3200;
     this.clock = 0;
@@ -81,6 +104,8 @@ export class Fight {
         ko: false,
         mood: 'idle',
         moodUntil: 0,
+        score: 0,
+        dizzyUntil: 0,
         // Staggered so nobody can dump all four moves in the first two seconds.
         cooldowns: { pie: 2500, fart: 4500, signature: 6500 },
         target: null,
@@ -106,14 +131,21 @@ export class Fight {
     return [...this.players.values()].filter((p) => !p.ko);
   }
 
+  /** Dizzy fighters cannot be hit, so nobody gets stomped while they are down. */
+  canBeHit(player) {
+    return !player.ko && this.clock >= player.dizzyUntil;
+  }
+
   opponentsOf(id) {
-    return [...this.players.values()].filter((p) => p.id !== id && !p.ko);
+    return [...this.players.values()].filter((p) => p.id !== id && this.canBeHit(p));
   }
 
   autoTargetEveryone() {
     for (const player of this.players.values()) {
       const current = player.target && this.players.get(player.target);
-      if (!current || current.ko) {
+      // Note canBeHit, not ko: in a rumble the target may only be down for a
+      // few seconds, and everybody should look elsewhere while they are.
+      if (!current || !this.canBeHit(current)) {
         player.target = this.opponentsOf(player.id)[0]?.id || null;
       }
     }
@@ -124,7 +156,8 @@ export class Fight {
   setTarget(playerId, targetId) {
     const player = this.players.get(playerId);
     if (!player || player.ko) return;
-    if (this.players.has(targetId) && targetId !== playerId) player.target = targetId;
+    const target = this.players.get(targetId);
+    if (target && targetId !== playerId && this.canBeHit(target)) player.target = targetId;
   }
 
   setBlocking(playerId, on) {
@@ -140,6 +173,7 @@ export class Fight {
     if (this.phase !== 'fighting') return 'not-fighting';
     const player = this.players.get(playerId);
     if (!player || player.ko) return 'not-fighting';
+    if (this.clock < player.dizzyUntil) return 'dizzy';
     if (this.clock < player.stunUntil) return 'stunned';
     if (player.blocking) return 'blocking';
 
@@ -149,7 +183,11 @@ export class Fight {
 
     this.autoTargetEveryone();
     const target = player.target && this.players.get(player.target);
-    if (!target || target.ko) return 'no-target';
+    // A fighter who is out of it cannot be hit. Without this a rumble turns
+    // into stomping whoever is down: every extra swing lands on zero health,
+    // re-bonks them for another free point and pushes their timer out again,
+    // so they never get back up.
+    if (!target || !this.canBeHit(target)) return 'no-target';
 
     const speed = this.globalEffect === 'slowmo' ? 1.6 : 1;
     player.cooldowns[move.id] = this.clock + move.cooldown * speed;
@@ -189,8 +227,34 @@ export class Fight {
       shout: move.shout || null
     });
 
-    if (target.hp === 0) this.knockOut(target, player);
+    if (target.hp === 0) {
+      if (this.rumble) this.bonkOut(target, player);
+      else this.knockOut(target, player);
+    }
     return 'ok';
+  }
+
+  /**
+   * The rumble version of a knockout: the bonker scores, the bonked spins for
+   * a few seconds and then comes straight back at full health.
+   */
+  bonkOut(target, by) {
+    target.dizzyUntil = this.clock + DIZZY_MS;
+    target.blocking = false;
+    target.stunUntil = 0;
+    this.setMood(target, 'dizzy', DIZZY_MS);
+    if (by) by.score += 1;
+
+    this.emit('fx', {
+      seq: ++fxSeq,
+      kind: 'bonked',
+      to: target.id,
+      from: by?.id || null,
+      score: by?.score || 0,
+      sfx: 'lose'
+    });
+    this.autoTargetEveryone();
+    this.checkOver();
   }
 
   knockOut(target, by) {
@@ -211,6 +275,17 @@ export class Fight {
 
   checkOver() {
     if (this.phase === 'over') return;
+
+    if (this.rumble) {
+      const leader = [...this.players.values()].find((p) => p.score >= this.options.targetScore);
+      if (!leader) return;
+      this.phase = 'over';
+      this.winner = leader.id;
+      this.setMood(leader, 'win', 999999);
+      this.emit('over', { winner: this.winner });
+      return;
+    }
+
     const standing = this.alive();
     if (standing.length <= 1) {
       this.phase = 'over';
@@ -242,6 +317,17 @@ export class Fight {
     const seconds = dt / 1000;
     for (const player of this.players.values()) {
       if (player.ko) continue;
+
+      if (player.dizzyUntil) {
+        if (this.clock < player.dizzyUntil) { player.mood = 'dizzy'; continue; }
+        // Back on their feet, full health, ready to be annoying again.
+        player.dizzyUntil = 0;
+        player.hp = player.maxHp;
+        player.stamina = 100;
+        this.setMood(player, 'idle', 0);
+        this.emit('fx', { seq: ++fxSeq, kind: 'respawn', to: player.id, sfx: 'boing' });
+      }
+
       if (player.blocking) {
         player.stamina = Math.max(0, player.stamina - BLOCK_DRAIN * seconds);
         if (player.stamina === 0) player.blocking = false;
@@ -263,14 +349,28 @@ export class Fight {
   }
 
   runSillyEvent() {
-    const event = SILLY_EVENTS[Math.floor(Math.random() * SILLY_EVENTS.length)];
-    const victims = this.alive();
+    const victims = this.alive().filter((p) => this.canBeHit(p));
+    if (!victims.length) return;
+    // Some events need a crowd — a face swap with one fighter is just a fighter.
+    const pool = SILLY_EVENTS.filter((e) => victims.length >= (e.needs || 1));
+    const event = pool[Math.floor(Math.random() * pool.length)];
     const victim = victims[Math.floor(Math.random() * victims.length)];
 
     if (event.global) {
       this.globalEffect = event.global;
-      this.globalUntil = this.clock + 7000;
-      this.emit('fx', { seq: ++fxSeq, kind: 'silly', event: event.id, emoji: event.emoji, text: event.text, sfx: event.sfx, global: event.global });
+      this.globalUntil = this.clock + SILLY_GLOBAL_MS;
+      this.emit('fx', {
+        seq: ++fxSeq,
+        kind: 'silly',
+        event: event.id,
+        emoji: event.emoji,
+        text: event.text,
+        sfx: event.sfx,
+        global: event.global,
+        ms: SILLY_GLOBAL_MS,
+        // The host decides who wears whose face so every device agrees.
+        swap: event.global === 'faceswap' ? faceSwapMap(victims) : null
+      });
       return;
     }
 
@@ -296,7 +396,10 @@ export class Fight {
       sfx: event.sfx
     });
 
-    if (victim.hp === 0) this.knockOut(victim, null);
+    if (victim.hp === 0) {
+      if (this.rumble) this.bonkOut(victim, null);
+      else this.knockOut(victim, null);
+    }
   }
 
   /* ------------------------------------------------------------ snapshots */
@@ -304,6 +407,8 @@ export class Fight {
   snapshot() {
     return {
       phase: this.phase,
+      mode: this.options.mode,
+      targetScore: this.options.targetScore,
       clock: Math.round(this.clock),
       countdown: Math.max(0, Math.ceil(this.countdown / 1000)),
       globalEffect: this.globalEffect,
@@ -315,6 +420,8 @@ export class Fight {
         stamina: Math.round(p.stamina),
         blocking: p.blocking,
         stunned: this.clock < p.stunUntil,
+        dizzy: this.clock < p.dizzyUntil,
+        score: p.score,
         ko: p.ko,
         mood: p.mood,
         target: p.target,
@@ -330,6 +437,8 @@ export class Fight {
 export function readSnapshot(snapshot, charactersById) {
   return {
     phase: snapshot.phase,
+    mode: snapshot.mode,
+    targetScore: snapshot.targetScore,
     countdown: snapshot.countdown,
     globalEffect: snapshot.globalEffect,
     winner: snapshot.winner,

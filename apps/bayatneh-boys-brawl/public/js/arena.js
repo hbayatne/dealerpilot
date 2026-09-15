@@ -8,7 +8,7 @@
  */
 
 import { renderGoof, renderHead, SPECIES } from './characters.js';
-import { Fight, movesFor, readSnapshot } from './fight.js';
+import { Fight, movesFor, readSnapshot, DEFAULT_TARGET_SCORE } from './fight.js';
 import { h, clear, popText, confetti, shake, toast } from './ui.js';
 import { play } from './sfx.js';
 import { playClip, speak, startRecording, blobToDataUrl, canRecord } from './voice.js';
@@ -21,7 +21,17 @@ const COMMENTARY = [
   'That was a LOT of noise.',
   'He is going to remember that one.',
   'BONK delivered!',
-  'Straight to the noggin!'
+  'Straight to the noggin!',
+  'That is going in the family group chat.',
+  'He bounced! He actually bounced!',
+  'Somebody is telling Mum about this.',
+  'OOF. Right in the homework.',
+  'That was a fully illegal move and we loved it.',
+  'The crowd is a dog and one confused cat.',
+  'He is fine. Probably. Mostly.',
+  'That smelled worse than it looked.',
+  'Ten out of ten. No notes.',
+  'And that, kids, is why we have carpet.'
 ];
 
 const SEATS = {
@@ -51,11 +61,16 @@ export class Arena {
     this.isHost = options.isHost;
     this.charactersById = Object.fromEntries(this.entries.map((e) => [e.id, e.character]));
 
-    this.fight = this.isHost ? new Fight(this.entries) : null;
+    this.mode = options.mode || 'elimination';
+    this.targetScore = options.targetScore || DEFAULT_TARGET_SCORE;
+    this.fight = this.isHost
+      ? new Fight(this.entries, { mode: this.mode, targetScore: this.targetScore })
+      : null;
     this.bots = new Map(this.entries.filter((e) => e.bot).map((e) => [e.id, { next: 2000 }]));
     this.view = null;          // last snapshot, reshaped for rendering
     this.seenFx = new Set();
     this.lastMood = new Map();
+    this.faceSwap = null;      // id -> whose face they are wearing right now
     this.talkLevel = new Map();
     this.running = true;
     this.unsubscribes = [];
@@ -109,16 +124,19 @@ export class Arena {
 
       const bar = h('div', { class: 'hp-fill' });
       const stam = h('div', { class: 'stam-fill' });
+      const score = h('div', { class: 'score-pips' },
+        Array.from({ length: this.targetScore }, () => h('span', { class: 'pip' })));
       const head = h('div', { class: 'hp-head', html: renderHead(entry.character) });
       const card = h('div', { class: 'hp-card', dataset: { id: entry.id } },
         head,
         h('div', { class: 'hp-meta' },
           h('div', { class: 'hp-name' }, entry.character.name),
           h('div', { class: 'hp-bar' }, bar),
-          h('div', { class: 'stam-bar' }, stam))
+          h('div', { class: 'stam-bar' }, stam),
+          this.mode === 'rumble' ? score : null)
       );
       this.hpRow.append(card);
-      this.bars.set(entry.id, { bar, stam, card, head });
+      this.bars.set(entry.id, { bar, stam, card, head, score });
     });
 
     for (const id of this.controls) this.pads.append(this.buildPad(id));
@@ -283,7 +301,7 @@ export class Arena {
   doAttack(playerId, moveId) {
     if (this.isHost) {
       const result = this.fight.attack(playerId, moveId);
-      if (result === 'cooldown' || result === 'stunned') play('no');
+      if (result === 'cooldown' || result === 'stunned' || result === 'dizzy') play('no');
     } else {
       this.party?.send({ type: 'input', move: moveId }, this.party.hostId);
     }
@@ -369,6 +387,34 @@ export class Arena {
       return;
     }
 
+    if (fx.kind === 'bonked') {
+      const victim = this.fighters.get(fx.to);
+      if (victim) {
+        victim.node.classList.add('is-dizzy');
+        shake(this.stage, 'big');
+        popText(victim.node, 'BONKED!', { x: 50, y: 6, tone: 'hit' });
+        this.starBurst(victim);
+        this.starBurst(victim);
+      }
+      const bonker = this.charactersById[fx.from];
+      this.announce(bonker
+        ? `\u{1F4A5} ${bonker.name} bonked ${this.charactersById[fx.to]?.name}! (${fx.score})`
+        : `\u{1F4A5} ${this.charactersById[fx.to]?.name} got bonked by the scenery!`);
+      return;
+    }
+
+    if (fx.kind === 'respawn') {
+      const back = this.fighters.get(fx.to);
+      if (back) {
+        back.node.classList.remove('is-dizzy');
+        back.node.classList.remove('pop-back');
+        void back.node.offsetWidth;
+        back.node.classList.add('pop-back');
+        popText(back.node, "I'M BACK!", { x: 50, y: 10, tone: 'block' });
+      }
+      return;
+    }
+
     if (fx.kind === 'ko') {
       const victim = this.fighters.get(fx.to);
       victim?.node.classList.add('is-ko');
@@ -387,11 +433,47 @@ export class Arena {
           if (fx.heal) this.damageNumber(fx.to, fx.heal, false, true);
         }
       }
-      if (fx.global === 'bigheads') this.stage.classList.add('big-heads');
-      if (fx.global === 'slowmo') this.stage.classList.add('slow-mo');
-      if (fx.global) {
-        setTimeout(() => this.stage.classList.remove('big-heads', 'slow-mo'), 7000);
-      }
+      if (fx.global) this.startGlobalEffect(fx);
+    }
+  }
+
+  /** Whole-arena silliness: a class on the stage, and it all reverts together. */
+  startGlobalEffect(fx) {
+    const CLASSES = ['big-heads', 'slow-mo', 'upside-down', 'banana-rain'];
+    const classFor = {
+      bigheads: 'big-heads',
+      slowmo: 'slow-mo',
+      upsidedown: 'upside-down',
+      bananarain: 'banana-rain'
+    };
+    clearTimeout(this.globalTimer);
+    this.stage.classList.remove(...CLASSES);
+    this.faceSwap = null;
+
+    if (classFor[fx.global]) this.stage.classList.add(classFor[fx.global]);
+    if (fx.global === 'bananarain') this.rainBananas();
+    if (fx.global === 'faceswap' && fx.swap) {
+      this.faceSwap = fx.swap;
+      this.repaintAll();
+    }
+
+    this.globalTimer = setTimeout(() => {
+      this.stage.classList.remove(...CLASSES);
+      if (this.faceSwap) { this.faceSwap = null; this.repaintAll(); }
+    }, fx.ms || 7000);
+  }
+
+  /** Bananas tumbling down the back of the stage. Purely decorative. */
+  rainBananas() {
+    for (let i = 0; i < 18; i++) {
+      const banana = h('div', { class: 'banana', style: {
+        left: `${Math.random() * 96}%`,
+        animationDelay: `${(Math.random() * 2.2).toFixed(2)}s`,
+        animationDuration: `${(1.6 + Math.random() * 1.4).toFixed(2)}s`,
+        fontSize: `${18 + Math.round(Math.random() * 18)}px`
+      } }, '\u{1F34C}');
+      this.stage.append(banana);
+      setTimeout(() => banana.remove(), 7200);
     }
   }
 
@@ -477,7 +559,7 @@ export class Arena {
     this.talkLevel.set(playerId, level);
     const fighter = this.fighters.get(playerId);
     if (!fighter) return;
-    const character = this.charactersById[playerId];
+    const character = this.characterFor(playerId);
     const state = this.view?.players.find((p) => p.id === playerId);
     if (level > 0) {
       fighter.art.innerHTML = renderGoof(character, { mood: 'talk', mouthOpen: level, facing: fighter.facing });
@@ -489,10 +571,34 @@ export class Arena {
     }
   }
 
+  /**
+   * The character to draw for a fighter. Normally their own, but during a face
+   * swap they wear somebody else's. Only the face travels — everybody keeps
+   * their own body and outfit, which is the whole joke: it is obviously Tamer,
+   * standing there wearing Ameen's face.
+   */
+  characterFor(id) {
+    const mine = this.charactersById[id];
+    const theirs = this.faceSwap && this.charactersById[this.faceSwap[id]];
+    return theirs && theirs !== mine ? { ...mine, face: theirs.face, skin: theirs.skin } : mine;
+  }
+
+  /** Redraw every fighter at their current mood, ignoring the mood cache. */
+  repaintAll() {
+    this.lastMood.clear();
+    for (const entry of this.entries) {
+      const fighter = this.fighters.get(entry.id);
+      if (!fighter) continue;
+      const mood = this.view?.players.find((p) => p.id === entry.id)?.mood || 'idle';
+      fighter.art.innerHTML = renderGoof(this.characterFor(entry.id), { mood, facing: fighter.facing });
+      this.lastMood.set(entry.id, mood);
+    }
+  }
+
   renderAllGoofs() {
     for (const entry of this.entries) {
       const fighter = this.fighters.get(entry.id);
-      fighter.art.innerHTML = renderGoof(entry.character, { mood: 'idle', facing: fighter.facing });
+      fighter.art.innerHTML = renderGoof(this.characterFor(entry.id), { mood: 'idle', facing: fighter.facing });
       this.lastMood.set(entry.id, 'idle');
     }
   }
@@ -508,6 +614,10 @@ export class Arena {
         bars.bar.dataset.low = player.hp <= (player.maxHp || 140) * 0.3 ? 'yes' : 'no';
         bars.stam.style.width = `${player.stamina}%`;
         bars.card.classList.toggle('is-ko', player.ko);
+        bars.card.classList.toggle('is-dizzy', Boolean(player.dizzy));
+        if (bars.score) {
+          [...bars.score.children].forEach((pip, i) => pip.classList.toggle('is-on', i < (player.score || 0)));
+        }
       }
 
       const fighter = this.fighters.get(player.id);
@@ -515,11 +625,12 @@ export class Arena {
       fighter.node.classList.toggle('is-ko', player.ko);
       fighter.node.classList.toggle('is-blocking', player.blocking);
       fighter.node.classList.toggle('is-stunned', player.stunned);
+      fighter.node.classList.toggle('is-dizzy', Boolean(player.dizzy));
 
       // Only redraw the SVG when the expression actually changes.
       const talking = (this.talkLevel.get(player.id) || 0) > 0;
       if (!talking && this.lastMood.get(player.id) !== player.mood) {
-        fighter.art.innerHTML = renderGoof(this.charactersById[player.id], { mood: player.mood, facing: fighter.facing });
+        fighter.art.innerHTML = renderGoof(this.characterFor(player.id), { mood: player.mood, facing: fighter.facing });
         this.lastMood.set(player.id, player.mood);
       }
     }
@@ -535,10 +646,14 @@ export class Arena {
         entry.sweep.style.transform = `scaleY(${ratio})`;
         entry.btn.classList.toggle('is-cooling', ratio > 0.02);
       }
-      pad.classList.toggle('is-out', me.ko);
+      pad.classList.toggle('is-out', me.ko || Boolean(me.dizzy));
+      pad.classList.toggle('is-dizzy', Boolean(me.dizzy));
       for (const btn of pad._targetRow?.children || []) {
+        const them = view.players.find((p) => p.id === btn.dataset.id);
         btn.classList.toggle('is-target', btn.dataset.id === me.target);
-        btn.classList.toggle('is-down', Boolean(view.players.find((p) => p.id === btn.dataset.id)?.ko));
+        // Greyed out while they are down, so tapping a spinning brother does
+        // not just silently do nothing.
+        btn.classList.toggle('is-down', Boolean(them?.ko || them?.dizzy));
       }
     }
 
@@ -557,7 +672,11 @@ export class Arena {
       h('div', { class: 'result-crown' }, '\u{1F451}'),
       winner ? h('div', { class: 'result-head', html: renderHead(winner, 'win') }) : h('div', { class: 'result-crown' }, '\u{1F4A5}'),
       h('h2', {}, winner ? `${winner.name} WINS!` : 'Nobody wins!'),
-      h('p', {}, winner ? SPECIES[winner.species].blurb : 'Everybody fell over.'),
+      h('p', {}, winner
+        ? (this.mode === 'rumble'
+            ? `${this.targetScore} bonks. ${SPECIES[winner.species].blurb}`
+            : SPECIES[winner.species].blurb)
+        : 'Everybody fell over.'),
       h('div', { class: 'row' },
         (this.isHost || !this.party) ? h('button', { class: 'big-btn', onclick: () => this.rematch() },
           h('span', { class: 'big-btn-emoji' }, '\u{1F501}'), 'Again!') : null,
@@ -643,6 +762,7 @@ export class Arena {
   destroy() {
     this.running = false;
     cancelAnimationFrame(this.frame);
+    clearTimeout(this.globalTimer);
     for (const off of this.unsubscribes) off();
     this.unsubscribes = [];
   }

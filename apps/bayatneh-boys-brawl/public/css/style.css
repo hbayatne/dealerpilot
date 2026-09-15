@@ -339,6 +339,22 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 .home-name { font-family: var(--display); font-size: 24px; }
 .home-species { font-size: 14px; opacity: 0.75; margin-bottom: 4px; }
 
+.mode-row { display: flex; flex-direction: column; gap: 8px; }
+.mode-btn {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 12px; min-height: 66px;
+  border: 3px solid var(--ink); border-radius: var(--round);
+  background: rgba(255,248,238,0.12); color: var(--paper);
+  cursor: pointer; font-family: var(--body);
+  transition: transform 0.15s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.mode-btn.is-on { background: var(--yellow); color: var(--ink); box-shadow: var(--shadow); }
+.mode-btn:active { transform: scale(0.97); }
+.mode-emoji { font-size: 28px; }
+.mode-text { display: flex; flex-direction: column; gap: 1px; }
+.mode-text strong { font-family: var(--display); font-size: 17px; letter-spacing: 0.5px; }
+.mode-text small { font-size: 12px; opacity: 0.75; }
+
 .menu { display: flex; flex-direction: column; gap: 10px; }
 .menu-btn { animation: card-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
 .menu-btn:nth-child(1) { animation-delay: 0.04s; }
@@ -611,6 +627,19 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 .hp-fill[data-low='yes'] { background: linear-gradient(90deg, var(--red), #ff9d9d); }
 .stam-fill { height: 100%; width: 100%; background: var(--blue); transition: width 0.12s; }
 
+/* Rumble score: one pip per bonk needed to win, so a five year old can see
+   how close everyone is without reading a number. */
+.score-pips { display: flex; gap: 3px; margin-top: 4px; }
+.pip {
+  flex: 1; height: 7px; border-radius: 3px;
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.22);
+  transition: background 0.2s, transform 0.2s;
+}
+.pip.is-on { background: var(--yellow); border-color: var(--yellow); transform: scaleY(1.35); }
+.hp-card.is-dizzy { opacity: 0.55; }
+.hp-card.is-dizzy .hp-name::after { content: ' 💫'; }
+
 .stage-wrap { position: relative; min-height: 0; container-type: size; }
 .stage {
   position: absolute; inset: 0;
@@ -646,6 +675,27 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 @keyframes inflate { to { transform: scale(1.5); } }
 .stage.slow-mo .fighter { transition: all 0.9s ease-out; filter: hue-rotate(35deg); }
 
+/* Upside down keeps the name tags readable — the joke is the goofballs, and a
+   five year old should still be able to find himself. */
+.stage.upside-down .fighter-art { transform: rotate(180deg); transition: transform 0.5s ease-out; }
+.stage.upside-down .fighter-tag { transform: none; }
+
+.banana {
+  position: absolute;
+  top: -8%;
+  z-index: 1;
+  pointer-events: none;
+  animation: banana-fall linear forwards;
+}
+@keyframes banana-fall {
+  from { transform: translateY(0) rotate(0deg); opacity: 1; }
+  to { transform: translateY(115cqh) rotate(540deg); opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .banana { animation-duration: 0.01ms; opacity: 0; }
+  .stage.big-heads .goof-head { animation: none; }
+}
+
 /* The box wraps the artwork exactly (the SVG sets its own height from its
    viewBox), so the effect layer's percentages land on the character rather
    than on empty space. Container units keep it from growing taller than the
@@ -674,6 +724,35 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 .fighter.is-ko .fighter-art { animation: none; transform: rotate(78deg) translateY(24px); opacity: 0.75; transition: transform 0.5s; }
 .fighter.is-blocking .fighter-art { filter: drop-shadow(0 0 14px var(--blue)); }
 .fighter.is-stunned .fighter-art { animation: idle-bob 0.35s ease-in-out infinite; }
+
+/* Bonked, but only for a few seconds — spinning on the spot rather than out. */
+.fighter.is-dizzy .fighter-art {
+  animation: dizzy-spin 1.1s linear infinite;
+  filter: saturate(0.5) drop-shadow(0 8px 6px rgba(0,0,0,0.45));
+}
+@keyframes dizzy-spin {
+  0%   { transform: rotate(-9deg) translateY(0); }
+  50%  { transform: rotate(9deg) translateY(-5px); }
+  100% { transform: rotate(-9deg) translateY(0); }
+}
+.fighter.is-dizzy::after {
+  content: '💫';
+  position: absolute; top: 2%; left: 50%;
+  transform: translateX(-50%);
+  font-size: clamp(20px, 5vw, 30px);
+  animation: dizzy-orbit 1.1s linear infinite;
+  pointer-events: none;
+}
+@keyframes dizzy-orbit {
+  from { transform: translateX(-50%) rotate(0deg) translateX(18px); }
+  to   { transform: translateX(-50%) rotate(360deg) translateX(18px); }
+}
+.fighter.pop-back .fighter-art { animation: pop-back 0.55s cubic-bezier(0.2, 1.7, 0.4, 1); }
+@keyframes pop-back {
+  0%  { transform: scale(0.2) rotate(-25deg); opacity: 0.2; }
+  60% { transform: scale(1.18) rotate(6deg); opacity: 1; }
+  to  { transform: scale(1) rotate(0); }
+}
 .fighter.is-talking .fighter-art { animation: idle-bob 0.6s ease-in-out infinite; }
 
 .fighter-tag {
@@ -820,6 +899,13 @@ h2 { font-size: clamp(22px, 6vw, 32px); }
 .pad.is-out .move-grid,
 .pad.is-out .target-row,
 .pad.is-out .block-btn { opacity: 0.35; pointer-events: none; }
+
+/* Dizzy still gets to shout — the taunt button stays live. */
+.pad.is-dizzy .pad-name::after {
+  content: ' 💫 dizzy!';
+  color: var(--yellow);
+  font-size: 11px;
+}
 .pad-name {
   font-family: var(--display); font-size: 13px; text-align: center;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

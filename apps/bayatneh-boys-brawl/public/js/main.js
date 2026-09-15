@@ -9,6 +9,7 @@ import { renderLab } from './lab.js';
 import { renderTalkBooth } from './talkbooth.js';
 import { Arena } from './arena.js';
 import { Party } from './net.js';
+import { DEFAULT_TARGET_SCORE } from './fight.js';
 import { h, clear, toast, overlay } from './ui.js';
 import { play, unlockAudio, setMuted, isMuted } from './sfx.js';
 import { canRecord } from './voice.js';
@@ -214,13 +215,39 @@ function showHome() {
         partyAvailable
           ? menuButton('\u{1F30D}', 'Party fight', 'Play with your brothers on their own devices', showParty)
           : menuButton('\u{1F30D}', 'Party fight', 'Needs the home server \u{2014} ask Dad to start it', explainParty),
-        menuButton('\u{1F6CB}', 'Couch fight', 'Share this screen', showCouchSetup),
+        menuButton('\u{1F6CB}', 'Couch rumble', 'All of you on this one screen', showCouchSetup),
         menuButton('\u{1F916}', 'Fight a robot', 'Practise on your own', startBotFight),
         menuButton('\u{1F3A4}', 'Talk Booth', 'Make your goofball repeat you', () => showTalk(me)))));
 }
 
 function explainParty() {
   toast('Party fights need the game running on the home computer.', '\u{1F4BB}');
+}
+
+/**
+ * Two ways to fight. Rumble exists because elimination puts the youngest out
+ * first and leaves him watching his brothers — in a rumble nobody is ever out.
+ */
+function modePicker(initial, onChange) {
+  let mode = initial;
+  const row = h('div', { class: 'mode-row' });
+  const options = [
+    { id: 'rumble', emoji: '\u{1F4A5}', name: 'RUMBLE', sub: `Nobody is ever out. First to ${DEFAULT_TARGET_SCORE} bonks wins.` },
+    { id: 'elimination', emoji: '\u{1F3C6}', name: 'Last One Standing', sub: 'Get knocked out and you are done.' }
+  ];
+  const paint = () => {
+    clear(row);
+    for (const option of options) {
+      row.append(h('button', {
+        class: `mode-btn ${option.id === mode ? 'is-on' : ''}`,
+        onclick: () => { play('select'); mode = option.id; onChange(mode); paint(); }
+      },
+        h('span', { class: 'mode-emoji' }, option.emoji),
+        h('span', { class: 'mode-text' }, h('strong', {}, option.name), h('small', {}, option.sub))));
+    }
+  };
+  paint();
+  return row;
 }
 
 function menuButton(emoji, title, sub, onClick) {
@@ -311,6 +338,7 @@ function showCouchSetup() {
   const chosen = new Set([store.getActive()?.id, characters.find((c) => c.id !== store.getActive()?.id)?.id].filter(Boolean));
   const grid = h('div', { class: 'roster-grid small' });
   const startBtn = h('button', { class: 'big-btn' }, h('span', { class: 'big-btn-emoji' }, '\u{1F44A}'), 'FIGHT!');
+  let mode = store.getSetting('lastMode') || 'rumble';
 
   function refresh() {
     clear(grid);
@@ -333,9 +361,10 @@ function showCouchSetup() {
 
   startBtn.addEventListener('click', () => {
     const entries = characters.filter((c) => chosen.has(c.id)).map((c) => ({ id: c.id, character: c }));
+    store.setSetting('lastMode', mode);
     // "Again!" has to re-run this same line-up, not drop them back on the picker.
     const run = () => startFight({
-      entries, controls: entries.map((e) => e.id), isHost: true, party: null, replay: run
+      entries, controls: entries.map((e) => e.id), isHost: true, party: null, mode, replay: run
     });
     run();
   });
@@ -348,6 +377,7 @@ function showCouchSetup() {
         h('span', { class: 'mini-btn ghost-space' })),
       h('p', { class: 'hint' }, 'Pick 2 to 4 goofballs. Everyone gets their own buttons on this screen.'),
       grid,
+      modePicker(mode, (m) => { mode = m; }),
       h('div', { class: 'lab-actions' }, startBtn)));
 
   refresh();
@@ -368,7 +398,7 @@ function startBotFight() {
     { id: me.id, character: me },
     { id: 'bot1', character: bot, bot: true }
   ];
-  startFight({ entries, controls: [me.id], isHost: true, party: null, replay: startBotFight });
+  startFight({ entries, controls: [me.id], isHost: true, party: null, mode: 'elimination', replay: startBotFight });
 }
 
 /* -------------------------------------------------------------- party mode */
@@ -429,6 +459,8 @@ function showLobby() {
   const list = h('div', { class: 'lobby-list' });
   const startBtn = h('button', { class: 'big-btn' }, h('span', { class: 'big-btn-emoji' }, '\u{1F44A}'), 'FIGHT!');
   const waiting = h('p', { class: 'hint' }, 'Waiting for the host to start...');
+  let mode = store.getSetting('lastMode') || 'rumble';
+  const picker = modePicker(mode, (m) => { mode = m; });
 
   const refresh = () => {
     clear(list);
@@ -442,6 +474,7 @@ function showLobby() {
         ].filter(Boolean).join(' \u{00B7} '))));
     }
     startBtn.hidden = !party.isHost;
+    picker.hidden = !party.isHost;
     waiting.hidden = party.isHost;
     startBtn.disabled = party.roster().length < 2;
     startBtn.textContent = party.roster().length < 2 ? 'Waiting for a brother...' : 'FIGHT!';
@@ -451,7 +484,7 @@ function showLobby() {
   const offHost = party.on('host', refresh);
   const offBegin = party.on('begin', (msg) => {
     cleanup();
-    beginPartyFight(msg.entries, false);
+    beginPartyFight(msg.entries, false, msg.mode || 'elimination');
   });
   const offDropped = party.on('dropped', () => {
     cleanup();
@@ -463,9 +496,10 @@ function showLobby() {
 
   startBtn.addEventListener('click', () => {
     const entries = party.roster().map(({ id, profile }) => ({ id, character: profile }));
-    party.send({ type: 'begin', entries });
+    store.setSetting('lastMode', mode);
+    party.send({ type: 'begin', entries, mode });
     cleanup();
-    beginPartyFight(entries, true);
+    beginPartyFight(entries, true, mode);
   });
 
   clear(app).append(
@@ -480,6 +514,7 @@ function showLobby() {
       h('div', { class: 'code-badge' }, h('small', {}, 'Party code'), h('strong', {}, party.code || '----')),
       h('p', { class: 'hint' }, 'Tell your brothers this code. They tap Join and type it in.'),
       list,
+      picker,
       h('div', { class: 'lab-actions' }, startBtn, waiting),
       h('button', {
         class: 'mini-btn wide',
@@ -489,20 +524,21 @@ function showLobby() {
   refresh();
 }
 
-function beginPartyFight(entries, isHost) {
+function beginPartyFight(entries, isHost, mode = 'elimination') {
   startFight({
     entries,
     controls: [party.selfId],
     isHost,
     party,
-    replay: () => beginPartyFight(entries, isHost),
+    mode,
+    replay: () => beginPartyFight(entries, isHost, mode),
     onExit: () => { party.disconnect(); showHome(); }
   });
 }
 
 /* ------------------------------------------------------------------- fight */
 
-function startFight({ entries, controls, isHost, party: net, replay, onExit }) {
+function startFight({ entries, controls, isHost, party: net, mode = 'elimination', replay, onExit }) {
   tearDown();
   arena = new Arena({
     mount: app,
@@ -510,6 +546,7 @@ function startFight({ entries, controls, isHost, party: net, replay, onExit }) {
     controls,
     party: net,
     isHost,
+    mode,
     onExit: onExit || showHome,
     onRematch: () => { tearDown(); replay(); }
   });
