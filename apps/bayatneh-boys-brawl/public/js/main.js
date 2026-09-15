@@ -20,6 +20,23 @@ let arena = null;
 
 /* ------------------------------------------------------------------- utils */
 
+/**
+ * Party mode needs the little websocket server that ships with this app. When
+ * the game is served from anywhere else — a static host, a published copy of
+ * public/ — there is nothing to connect to, so the menu says so rather than
+ * handing a five year old a button that only produces an error.
+ */
+let partyAvailable = false;
+
+async function detectParty() {
+  try {
+    const response = await fetch('party-available', { cache: 'no-store' });
+    partyAvailable = response.ok && (await response.json())?.party === true;
+  } catch {
+    partyAvailable = false;
+  }
+}
+
 function tearDown() {
   if (arena) { arena.destroy(); arena = null; }
 }
@@ -194,10 +211,16 @@ function showHome() {
           h('button', { class: 'mini-btn wide', onclick: showRoster }, '\u{1F465} My goofballs'))),
 
       h('div', { class: 'menu' },
-        menuButton('\u{1F30D}', 'Party fight', 'Play with your brothers on their own devices', showParty),
+        partyAvailable
+          ? menuButton('\u{1F30D}', 'Party fight', 'Play with your brothers on their own devices', showParty)
+          : menuButton('\u{1F30D}', 'Party fight', 'Needs the home server \u{2014} ask Dad to start it', explainParty),
         menuButton('\u{1F6CB}', 'Couch fight', 'Share this screen', showCouchSetup),
         menuButton('\u{1F916}', 'Fight a robot', 'Practise on your own', startBotFight),
         menuButton('\u{1F3A4}', 'Talk Booth', 'Make your goofball repeat you', () => showTalk(me)))));
+}
+
+function explainParty() {
+  toast('Party fights need the game running on the home computer.', '\u{1F4BB}');
 }
 
 function menuButton(emoji, title, sub, onClick) {
@@ -507,5 +530,11 @@ if (!canRecord()) {
 }
 
 window.addEventListener('error', (e) => console.error('[bonk]', e.message));
+
+detectParty().then(() => {
+  // The title screen does not use it, so redrawing is unnecessary — the home
+  // screen is built after this resolves in every path that reaches it.
+  if (document.querySelector('.home')) showHome();
+});
 
 showTitle();

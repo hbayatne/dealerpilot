@@ -44,6 +44,16 @@ const MIME = {
 function serveStatic(req, res) {
   const url = new URL(req.url, 'http://x');
   let rel = decodeURIComponent(url.pathname);
+
+  // How the page knows whether party mode is possible. Only this server
+  // answers it; a plain static host (or a published copy of public/) 404s,
+  // and the menu then says so instead of offering a button that cannot work.
+  if (rel === '/party-available') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+       .end('{"party":true}');
+    return;
+  }
+
   if (rel === '/' || rel === '') rel = '/index.html';
 
   // Resolve inside PUBLIC_DIR only. Anything that escapes is a 403.
