@@ -4,7 +4,7 @@
 
 import {
   SPECIES, SKIN_COLORS, OUTFIT_COLORS, HATS, FACE_GEAR,
-  HEAD_SIZES, BODY_SIZES, CATCHPHRASES,
+  HEAD_SIZES, BODY_SIZES, EYE_STYLES, CATCHPHRASES,
   renderGoof, applySpecies, randomCharacter, randomName
 } from './characters.js';
 import { VOICES, speak } from './voice.js';
@@ -79,6 +79,11 @@ export function renderLab(mount, { character, onSave, onBack, onDelete }) {
       Object.entries(FACE_GEAR).map(([id, gear]) => ({ id, emoji: gear.emoji, label: gear.name })),
       (item) => item.id === draft.faceGear,
       (item) => { draft.faceGear = item.id; }));
+
+    sections.append(chipRow('Cartoon eyes',
+      EYE_STYLES.map((e, i) => ({ id: e.id, emoji: e.emoji, label: e.name, emojiScale: 15 + i * 6 })),
+      (item) => item.id === (draft.eyeStyle || 'normal'),
+      (item) => { draft.eyeStyle = item.id; }));
 
     sections.append(chipRow('Head size',
       HEAD_SIZES.map((s, i) => ({ id: s.id, emoji: '\u{1F642}', label: s.name, emojiScale: 13 + i * 6 })),
