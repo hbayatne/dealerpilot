@@ -11,6 +11,7 @@ touches business data resolves (user, org) to a role first. There is no
 import datetime
 import hashlib
 import hmac
+import os
 import secrets
 
 from chaos import db
@@ -39,8 +40,19 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def signup(email, password, name=None):
+def signup_code_required():
+    """A deployed instance is reachable by anyone who finds the URL. Setting
+    CHAOS_SIGNUP_CODE turns sign-up into an invite: the product holds a
+    business's customer correspondence, so open registration next to it is a
+    door, not a feature. Unset (local development), sign-up stays open."""
+    return bool((os.environ.get("CHAOS_SIGNUP_CODE") or "").strip())
+
+
+def signup(email, password, name=None, code=None):
     email = (email or "").strip().lower()
+    wanted = (os.environ.get("CHAOS_SIGNUP_CODE") or "").strip()
+    if wanted and not hmac.compare_digest((code or "").strip(), wanted):
+        return None, None, "That invite code isn't right."
     if not email or "@" not in email or len(password or "") < 8:
         return None, None, "Enter a valid email and a password of at least 8 characters."
     uid = db.create_user(email, hash_password(password), name)

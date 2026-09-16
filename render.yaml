@@ -1,0 +1,29 @@
+# Render blueprint: New → Blueprint, point it at this repo, and it builds the
+# Dockerfile, provisions Postgres, and wires the two together.
+services:
+  - type: web
+    name: chaos-control
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      # Encrypts mailbox credentials. Generated once and then left alone —
+      # changing it makes every stored integration credential unreadable.
+      - key: CHAOS_SECRET_KEY
+        generateValue: true
+      # Sign-up is invite-only on a public URL. Read it from the Render
+      # dashboard after the first deploy and hand it to whoever should get in.
+      - key: CHAOS_SIGNUP_CODE
+        generateValue: true
+      # Render terminates TLS ahead of the app, so the client address arrives
+      # in X-Forwarded-For. Rate limiting is per-source and needs the real one.
+      - key: CHAOS_TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chaos-db
+          property: connectionString
+
+databases:
+  - name: chaos-db
+    plan: basic-256mb

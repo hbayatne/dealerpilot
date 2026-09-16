@@ -287,7 +287,11 @@ function renderLanding(){
       <input name="password" type="password" placeholder="Password" required style="flex:1;min-width:150px">
       <button class="primary">Sign in</button>
       <button type="button" class="ghost" onclick="doAuth(event,'signup')">Create account</button>
+      ${State.health&&State.health.signup_code_required?`<input name="code" placeholder="Invite code"
+        style="flex:1;min-width:140px" autocomplete="off">`:''}
     </form>
+    ${State.health&&State.health.signup_code_required?`<p class="tiny muted" style="margin-top:8px">
+      New accounts need an invite code on this instance.</p>`:''}
     <div id="authErr"></div>
   </div>`;
 }
@@ -296,8 +300,9 @@ async function doAuth(e,mode){
   e.preventDefault();
   const form = e.target.closest('form');
   const email=form.email.value, password=form.password.value;
+  const code=form.code?form.code.value:undefined;
   try{
-    await api('/api/'+mode,{method:'POST',body:JSON.stringify({email,password})});
+    await api('/api/'+mode,{method:'POST',body:JSON.stringify({email,password,code})});
     location.reload();
   }catch(err){ $('#authErr').innerHTML=`<div class="err" style="margin-top:10px">${esc(err.message)}</div>`; }
 }
