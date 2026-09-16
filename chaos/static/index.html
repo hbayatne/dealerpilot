@@ -1,0 +1,1048 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chaos Control</title>
+<style>
+:root{
+  --bg:#f7f7f5; --panel:#ffffff; --ink:#1a1a18; --muted:#6b6b66; --line:#e3e3df;
+  --accent:#1f5f4f; --accent-soft:#e8f1ee;
+  --crit:#8f2f2f; --high:#a8632a; --med:#7a6a2a; --low:#5a6b7a;
+  --crit-bg:#fbeeee; --high-bg:#fdf3e9; --med-bg:#faf7e8; --low-bg:#eef2f5;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#131413; --panel:#1c1e1c; --ink:#eceae5; --muted:#9a9a94; --line:#2c2f2c;
+        --accent:#6fb8a2; --accent-soft:#1d2b27;
+        --crit:#e08e8e; --high:#e0b184; --med:#d6cb8c; --low:#a8bcc9;
+        --crit-bg:#2a1c1c; --high-bg:#2a241b; --med-bg:#272519; --low-bg:#1c2328;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);padding:9px 15px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.primary:hover{opacity:.9}
+button.ghost{background:transparent;border-color:transparent;color:var(--muted);padding:6px 9px}
+button.ghost:hover{color:var(--ink)}
+button:disabled{opacity:.5;cursor:default}
+input,select,textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel);color:var(--ink);width:100%}
+input:focus,textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+.wrap{max-width:1060px;margin:0 auto;padding:0 18px}
+header.top{border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:9}
+header.top .wrap{display:flex;align-items:center;gap:12px;padding-block:13px;flex-wrap:wrap}
+/* The nav is the flexible element; the identity block stays on the first row.
+   Below 1080px the email is redundant next to Sign out, so it steps aside
+   rather than pushing the whole header onto a second line. */
+header.top nav{flex:1 1 auto;min-width:0;justify-content:flex-end}
+/* Email and Sign out travel together — separately they wrap apart and the
+   header silently becomes two rows. */
+.ident{display:flex;align-items:center;gap:8px;flex:0 0 auto;white-space:nowrap}
+/* The signed-in email is the least useful thing in this bar — the business
+   name is what a multi-location owner needs. It steps aside well before the
+   header would wrap. */
+@media(max-width:1400px){#who{display:none}}
+#orgPick{max-width:230px}
+@media(max-width:720px){header.top nav{justify-content:flex-start;order:3;flex-basis:100%}}
+.logo{font-weight:700;letter-spacing:-.02em;font-size:16px;display:flex;align-items:center;gap:8px}
+.logo .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
+nav{display:flex;gap:2px;flex-wrap:wrap;margin-left:auto}
+nav button{border:none;background:transparent;color:var(--muted);padding:7px 10px;font-size:13.5px;white-space:nowrap}
+nav button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+.card+.card{margin-top:14px}
+h1{font-size:26px;letter-spacing:-.02em;margin:0 0 6px}
+h2{font-size:17px;margin:0 0 12px;letter-spacing:-.01em}
+h3{font-size:14px;margin:0 0 6px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.tiny{font-size:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;gap:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:15px}
+.stat .n{font-size:25px;font-weight:680;letter-spacing:-.02em;display:block;line-height:1.2}
+.stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.score-wrap{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.score-num{font-size:58px;font-weight:700;letter-spacing:-.04em;line-height:1}
+.bar{height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:7px}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em}
+.pill.critical{background:var(--crit-bg);color:var(--crit)}
+.pill.high{background:var(--high-bg);color:var(--high)}
+.pill.medium{background:var(--med-bg);color:var(--med)}
+.pill.low,.pill.info{background:var(--low-bg);color:var(--low)}
+.finding{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);
+  padding:15px 17px;margin-bottom:10px;cursor:pointer;display:block;width:100%;text-align:left}
+.finding:hover{border-color:var(--accent)}
+.finding .ft{font-weight:640;margin:6px 0 3px;font-size:15px}
+.att{font-variant-numeric:tabular-nums;font-weight:700;color:var(--muted);font-size:13px}
+.ev{border-left:2px solid var(--line);padding:0 0 0 16px;margin:0}
+.ev li{list-style:none;padding:0 0 16px;position:relative}
+.ev li:before{content:"";position:absolute;left:-21px;top:5px;width:8px;height:8px;
+  border-radius:50%;background:var(--accent);outline:3px solid var(--panel)}
+.ev .when{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ev .lab{font-weight:620;font-size:13.5px}
+.ev .det{font-size:13.5px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);padding:7px 10px;border-bottom:1px solid var(--line);font-weight:600}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.banner{background:var(--med-bg);color:var(--med);padding:9px 14px;border-radius:8px;
+  font-size:13px;font-weight:600;margin-bottom:14px}
+.err{background:var(--crit-bg);color:var(--crit);padding:10px 14px;border-radius:8px;font-size:14px}
+.ok{background:var(--accent-soft);color:var(--accent);padding:10px 14px;border-radius:8px;font-size:14px}
+.hero{padding:56px 0 30px;text-align:center}
+.hero h1{font-size:40px;line-height:1.1;max-width:15ch;margin:0 auto 14px}
+.hero p{max-width:56ch;margin:0 auto 26px;font-size:17px;color:var(--muted)}
+.scanbox{display:flex;gap:9px;max-width:520px;margin:0 auto;flex-wrap:wrap}
+.scanbox input{flex:1;min-width:200px}
+.cover{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.cov{font-size:12px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.cov.on{background:var(--accent-soft);color:var(--accent);border-color:transparent;font-weight:600}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
+  border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;
+  justify-content:center;padding:24px 14px;overflow:auto;z-index:50}
+.modal .card{max-width:720px;width:100%;margin:20px 0}
+footer{padding:36px 0;color:var(--muted);font-size:13px;text-align:center}
+.hide{display:none!important}
+@media(max-width:640px){.hero h1{font-size:29px}.score-num{font-size:44px}.wrap{padding:0 16px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="logo"><span class="dot"></span><span id="brandName">Chaos Control</span></div>
+  <select id="orgPick" class="hide" style="width:auto;padding:6px 9px;font-size:13px"></select>
+  <nav id="nav" class="hide"></nav>
+  <div class="ident">
+    <span id="who" class="small muted"></span>
+    <button id="signout" class="ghost hide">Sign out</button>
+  </div>
+</div></header>
+
+<main class="wrap" id="main"></main>
+<footer id="foot"></footer>
+
+<script>
+const $ = (s,r=document)=>r.querySelector(s);
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = c => c==null ? null : "$"+Math.round(c/100).toLocaleString();
+const State = {brand:{}, user:null, orgs:[], org:null, report:null, tab:"home", scanResult:null};
+
+async function api(path, opts={}){
+  const r = await fetch(path,{headers:{'Content-Type':'application/json'},...opts});
+  let body=null; try{ body = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(body?.detail || `Request failed (${r.status})`);
+  return body;
+}
+function when(ts){
+  if(!ts) return "";
+  const d=new Date(ts.endsWith("Z")?ts:ts+"Z");
+  if(isNaN(d)) return ts;
+  return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+
+         d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
+}
+function ago(ts){
+  if(!ts) return "";
+  const d=new Date(ts.endsWith("Z")?ts:ts+"Z"); const days=(Date.now()-d)/86400000;
+  if(days<1) return "today"; if(days<2) return "yesterday";
+  return Math.round(days)+" days ago";
+}
+
+/* ------------------------------------------------------------------ boot */
+/* A shared scan report. Opens without an account and shows only the public
+   website scan — findings from a connected mailbox are never shareable, because
+   a link that leaks a customer's unanswered complaints is a breach, not a
+   growth loop. */
+function sharedToken(){
+  const m = location.pathname.match(/^\/report\/([\w-]+)$/);
+  return m ? m[1] : null;
+}
+
+async function renderShared(token){
+  $('#nav').classList.add('hide');
+  $('#main').innerHTML = `<div class="card"><span class="spin"></span> Loading report…</div>`;
+  try{
+    const {scan} = await api('/api/scan/shared/'+encodeURIComponent(token));
+    const b = State.brand;
+    $('#main').innerHTML = `
+      <section class="hero" style="padding:34px 0 18px">
+        <h1 style="font-size:30px;max-width:22ch">${esc(b.scan_name||'Scan')} report</h1>
+        <p style="font-size:15px">${esc(scan.target)} · ${esc(when(scan.created_at))}</p>
+      </section>
+      <div id="sharedOut"></div>
+      <div class="card">
+        <h2>This is only what we can see from outside</h2>
+        <p class="small muted">${esc(b.subline||'')}</p>
+        <a href="/"><button class="primary">${esc(b.cta||'Run a free scan')}</button></a>
+      </div>`;
+    renderWebsiteResult(scan.result, '#sharedOut', false);
+  }catch(e){
+    $('#main').innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div>
+      <p class="small muted" style="margin-top:12px">This report link may have expired or
+      been unshared. <a href="/">Run your own scan</a>.</p></div>`;
+  }
+}
+
+async function boot(){
+  const h = await api('/api/health');
+  State.brand = h.brand; State.health = h;
+  $('#brandName').textContent = h.brand.short;
+  document.title = h.brand.name;
+  $('#foot').innerHTML = `${esc(h.brand.name)} · <span class="muted">${esc(h.brand.tagline)}</span>`;
+  const shared = sharedToken();
+  if(shared){ return renderShared(shared); }
+  try{
+    const me = await api('/api/me');
+    State.user = me.user; State.orgs = me.orgs;
+    State.org = me.orgs[0] || null;
+    $('#who').textContent = me.user.email;
+    $('#signout').classList.remove('hide');
+    $('#signout').onclick = async()=>{ await api('/api/logout',{method:'POST'}); location.reload(); };
+    if(State.org){ await pickOrg(rememberedOrgId() || State.org.id); } else { renderOnboard(); }
+  }catch(e){ renderLanding(); }
+}
+function go(tab){ State.tab=tab; renderNav(); render(); window.scrollTo(0,0); }
+
+/* A user can own several businesses — a second location, a demo, another
+   company. Without a switcher they are silently pinned to whichever came
+   first, which looks exactly like the product finding nothing. */
+function rememberedOrgId(){
+  try{ return parseInt(localStorage.getItem('chaos_org')||'')||null; }catch(e){ return null; }
+}
+function rememberOrg(id){ try{ localStorage.setItem('chaos_org',id); }catch(e){} }
+
+async function pickOrg(id){
+  State.org = State.orgs.find(o=>o.id===Number(id)) || State.orgs[0];
+  rememberOrg(State.org.id);
+  renderOrgPicker();
+  await loadReport();
+  go(State.tab || 'home');
+}
+window.pickOrg=pickOrg;
+
+function renderOrgPicker(){
+  const el=$('#orgPick');
+  if(!State.orgs.length){ el.classList.add('hide'); return; }
+  el.classList.toggle('hide', State.orgs.length<2);
+  el.innerHTML = State.orgs.map(o=>
+    `<option value="${o.id}" ${State.org&&o.id===State.org.id?'selected':''}>${esc(o.name)}</option>`
+  ).join('');
+  el.onchange = e => pickOrg(e.target.value);
+}
+
+function renderNav(){
+  if(!State.org){ $('#nav').classList.add('hide'); return; }
+  $('#nav').classList.remove('hide');
+  const tabs=[['home',State.brand.console_name||'Control Center'],['feed',State.brand.feed_name||'Feed'],
+              ['commitments','Commitments'],['inventory','Inventory'],['memory','Memory'],
+              ['connect','Connections'],['trust','Trust']];
+  $('#nav').innerHTML = tabs.map(([k,l])=>
+    `<button class="${State.tab===k?'on':''}" onclick="go('${k}')">${esc(l)}</button>`).join('');
+}
+window.go=go;
+
+async function loadReport(){
+  if(!State.org) return;
+  State.report = await api(`/api/orgs/${State.org.id}/report`);
+}
+
+/* ------------------------------------------------------------------ landing */
+function renderLanding(){
+  const b=State.brand;
+  $('#main').innerHTML = `
+  <section class="hero">
+    <h1>${esc(b.tagline||'')}</h1>
+    <p>${esc(b.subline||'')}</p>
+    <form class="scanbox" onsubmit="runPublicScan(event)">
+      <input id="siteUrl" placeholder="yourbusiness.com" autocomplete="url" required>
+      <button class="primary" type="submit">${esc(b.cta||'Run a free scan')}</button>
+    </form>
+    <p class="tiny muted" style="margin-top:12px">No account needed. We only read what is publicly on your website.</p>
+  </section>
+  <div id="scanOut"></div>
+  <div class="card" style="margin-top:22px">
+    <h2>What happens after the scan</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(215px,1fr))">
+      <div><h3>1. Connect your email</h3><p class="small muted">Read-only. We reconstruct
+      conversations, not just messages.</p></div>
+      <div><h3>2. We build your business memory</h3><p class="small muted">People, companies
+      and what was said — resolved into one record per person.</p></div>
+      <div><h3>3. You see what's falling through</h3><p class="small muted">Unanswered
+      customers, broken promises, quotes nobody chased — each with the evidence.</p></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Already have an account?</h2>
+    <form class="row" onsubmit="doAuth(event,'login')" style="margin-top:8px">
+      <input name="email" type="email" placeholder="you@company.com" required style="flex:1;min-width:190px">
+      <input name="password" type="password" placeholder="Password" required style="flex:1;min-width:150px">
+      <button class="primary">Sign in</button>
+      <button type="button" class="ghost" onclick="doAuth(event,'signup')">Create account</button>
+      ${State.health&&State.health.signup_code_required?`<input name="code" placeholder="Invite code"
+        style="flex:1;min-width:140px" autocomplete="off">`:''}
+    </form>
+    ${State.health&&State.health.signup_code_required?`<p class="tiny muted" style="margin-top:8px">
+      New accounts need an invite code on this instance.</p>`:''}
+    <div id="authErr"></div>
+  </div>`;
+}
+
+async function doAuth(e,mode){
+  e.preventDefault();
+  const form = e.target.closest('form');
+  const email=form.email.value, password=form.password.value;
+  const code=form.code?form.code.value:undefined;
+  try{
+    await api('/api/'+mode,{method:'POST',body:JSON.stringify({email,password,code})});
+    location.reload();
+  }catch(err){ $('#authErr').innerHTML=`<div class="err" style="margin-top:10px">${esc(err.message)}</div>`; }
+}
+window.doAuth=doAuth;
+
+async function runPublicScan(e){
+  e.preventDefault();
+  const url=$('#siteUrl').value;
+  $('#scanOut').innerHTML=`<div class="card"><span class="spin"></span> Scanning ${esc(url)}…</div>`;
+  try{
+    const r = await api('/api/scan/website',{method:'POST',body:JSON.stringify({url})});
+    State.scanResult=r.result; renderWebsiteResult(r.result,'#scanOut',true);
+    if(r.result.share_token){
+      const link = location.origin + '/report/' + r.result.share_token;
+      $('#scanOut').insertAdjacentHTML('beforeend', `<div class="card">
+        <h2>Share this report</h2>
+        <p class="small muted">A read-only page of these public website findings. It contains
+          nothing from any connected system.</p>
+        <input readonly value="${esc(link)}" onclick="this.select()" style="margin-top:8px">
+      </div>`);
+    }
+  }catch(err){ $('#scanOut').innerHTML=`<div class="card"><div class="err">${esc(err.message)}</div></div>`; }
+}
+window.runPublicScan=runPublicScan;
+
+function renderWebsiteResult(res, mount, withCta){
+  const issues=res.issues||[];
+  const crit=issues.filter(i=>i.severity==='critical').length;
+  const warn=issues.filter(i=>i.severity==='warn').length;
+  $(mount).innerHTML = `
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">${esc(res.url)}</h2>
+      <span class="small muted">${issues.length} issue${issues.length===1?'':'s'} ·
+        ${crit} critical · ${warn} to fix</span>
+    </div>
+    ${issues.length===0?'<p class="ok" style="margin-top:12px">No problems found in the public checks we run.</p>':''}
+    <div style="margin-top:14px">
+      ${issues.map(i=>`
+        <div style="padding:13px 0;border-top:1px solid var(--line)">
+          <span class="pill ${i.severity==='warn'?'medium':(i.severity==='info'?'low':'critical')}">${esc(i.severity)}</span>
+          <div class="ft" style="margin-top:7px">${esc(i.headline)}</div>
+          <div class="small muted">${esc(i.detail)}</div>
+          <div class="small" style="margin-top:6px"><strong>What to do:</strong> ${esc(i.action)}</div>
+          ${i.technical?`<div class="tiny muted" style="margin-top:4px">Technical: ${esc(i.technical)}</div>`:''}
+        </div>`).join('')}
+    </div>
+    ${withCta?`<div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
+      <h3>This is only what we can see from outside.</h3>
+      <p class="small muted">The costly problems are inside your email: customers waiting on a
+      reply, promises nobody kept, quotes nobody chased. Connect your mailbox to see those.</p>
+      <button class="primary" onclick="document.querySelector('input[name=email]').focus()">Create an account</button>
+    </div>`:''}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ onboarding */
+function renderOnboard(){
+  $('#nav').classList.add('hide');
+  $('#main').innerHTML=`
+  <div class="card" style="max-width:560px;margin:36px auto">
+    <h1>Tell us about your business</h1>
+    <p class="muted small">Two fields. Everything else we work out ourselves and ask you to confirm.</p>
+    <form onsubmit="createOrg(event)" class="grid" style="margin-top:16px">
+      <label>Business name<input name="name" required placeholder="Northside Roofing"></label>
+      <label>Website<input name="website" placeholder="northsideroofing.com"></label>
+      <label>Industry<select name="industry">
+        <option value="">Choose…</option>
+        ${["Home services","Roofing","HVAC","Automotive","Dental","Med spa","Legal",
+           "Real estate","Insurance","Construction","Professional services","Other"]
+          .map(x=>`<option>${x}</option>`).join('')}
+      </select></label>
+      <div class="row"><button class="primary">Continue</button></div>
+      <div class="row" style="margin-top:4px">
+        <button type="button" class="ghost" onclick="makeDemo()">Explore with sample data</button>
+        <button type="button" class="ghost" onclick="makeDealerDemo()">Sample dealership (with inventory)</button>
+      </div>
+    </form>
+    <div id="onbErr"></div>
+  </div>`;
+}
+async function createOrg(e){
+  e.preventDefault(); const f=e.target;
+  try{
+    const r=await api('/api/orgs',{method:'POST',body:JSON.stringify({
+      name:f.name.value, website:f.website.value, industry:f.industry.value})});
+    State.orgs.push(r.org); State.tab='connect'; await pickOrg(r.org.id);
+  }catch(err){ $('#onbErr').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
+}
+window.createOrg=createOrg;
+async function makeDemo(){
+  $('#onbErr').innerHTML=`<div class="card" style="margin-top:12px"><span class="spin"></span> Building a sample business…</div>`;
+  const r=await api('/api/demo',{method:'POST'});
+  State.orgs.push(r.org); State.tab='home'; await pickOrg(r.org.id);
+}
+window.makeDemo=makeDemo;
+
+/* ------------------------------------------------------------------ render */
+function render(){
+  const r=State.report;
+  if(!State.org){ renderOnboard(); return; }
+  if(State.tab==='home') return renderHome(r);
+  if(State.tab==='feed') return renderFeed(r);
+  if(State.tab==='commitments') return renderCommitments();
+  if(State.tab==='inventory') return renderInventory();
+  if(State.tab==='memory') return renderMemory();
+  if(State.tab==='connect') return renderConnect();
+  if(State.tab==='trust') return renderTrust();
+}
+
+function greeting(){
+  const h=new Date().getHours();
+  return h<12?"Good morning":h<18?"Good afternoon":"Good evening";
+}
+
+function renderHome(r){
+  if(!r) return $('#main').innerHTML=`<div class="card"><span class="spin"></span> Loading…</div>`;
+  const s=r.score, sum=r.summary, demo=(r.org.name||"").includes("(demo)");
+  /* Nothing connected yet. "Nothing needs your attention" would be a lie by
+     omission here — we haven't looked at anything. Say so, and say what to do. */
+  if(!r.memory.messages && !(r.integrations||[]).length){
+    return $('#main').innerHTML=`
+    <div class="card">
+      <h1>${greeting()}</h1>
+      <p class="muted small">${esc(r.org.name)}</p>
+      <div class="banner" style="margin-top:16px;background:var(--accent-soft);color:var(--accent)">
+        We haven't looked at anything yet — so we can't tell you what you're missing.</div>
+      <h2 style="margin-top:18px">Connect your email to get your first findings</h2>
+      <p class="small muted">Read-only, and it takes about a minute with an app password.
+        Most of what falls through the cracks in a business falls through it in email:
+        customers waiting on a reply, promises nobody kept, quotes nobody chased.</p>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" onclick="go('connect')">Connect a mailbox</button>
+        <button onclick="makeDemo()">See it with sample data first</button>
+      </div>
+    </div>
+    ${r.org.website?`<div class="card"><h2>Meanwhile, your website</h2>
+      <p class="small muted">We can check ${esc(r.org.website)} right now without connecting anything.</p>
+      <button onclick="runScan()" id="scanBtn">Scan my website</button>
+      <div id="scanProgress"></div></div>`:''}`;
+  }
+  const band=s?s.band:'unknown';
+  const dims=s?Object.entries(s.dimensions||{}):[];
+  const analyzed=dims.filter(([,d])=>d.analyzed);
+  $('#main').innerHTML=`
+  ${demo?`<div class="banner">DEMO DATA — this is a sample business, not your real findings.</div>`:''}
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><h1 style="margin-bottom:2px">${greeting()}</h1>
+        <p class="muted small" style="margin:0">${esc(r.org.name)}</p></div>
+      <button class="primary" onclick="runScan()" id="scanBtn">Run a scan</button>
+    </div>
+    <div id="scanProgress"></div>
+    <div class="score-wrap" style="margin-top:22px">
+      <div>
+        <div class="tiny muted" style="text-transform:uppercase;letter-spacing:.06em">${esc(State.brand.score_name)}</div>
+        <div class="score-num" ${s&&s.coverage&&s.coverage.provisional?'style="opacity:.6"':''}>${s?s.score:'—'}</div>
+        <div class="small" style="font-weight:600">${
+          !s ? 'Run a scan to see your score'
+          : (s.coverage&&s.coverage.provisional)
+            ? 'Provisional'
+            : esc(bandLabel(band))}</div>
+        ${s&&s.coverage&&s.coverage.provisional?`<div class="tiny muted" style="max-width:15ch;margin-top:6px">
+          Based on ${s.coverage.analyzed_count} of ${s.coverage.total_count} dimensions —
+          too little of the business to call yet.</div>`:''}
+      </div>
+      <div style="flex:1;min-width:220px">
+        ${analyzed.map(([k,d])=>`
+          <div style="margin-bottom:9px">
+            <div class="row" style="justify-content:space-between;gap:6px">
+              <span class="small">${esc(d.label)}</span><span class="small att">${d.score}</span>
+            </div>
+            <div class="bar"><i style="width:${d.score}%"></i></div>
+          </div>`).join('') || '<p class="small muted">No dimensions analyzed yet.</p>'}
+      </div>
+    </div>
+    <div class="cover">
+      ${dims.map(([k,d])=>`<span class="cov ${d.analyzed?'on':''}" title="${esc(d.analyzed?'Analyzed':(d.reason||''))}">${esc(d.label)}${d.analyzed?'':' · '+esc(d.reason||'')}</span>`).join('')}
+    </div>
+    ${s?`<p class="tiny muted" style="margin-top:10px">${esc(s.coverage.statement)}
+       Method <code>${esc(s.methodology)}</code> — every number above is counted, not estimated.</p>`:''}
+  </div>
+
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(155px,1fr));margin-top:14px">
+    <div class="stat"><span class="n">${sum.revenue_at_risk_cents?money(sum.revenue_at_risk_cents):'—'}</span>
+      <span class="l">Revenue at risk</span>
+      <div class="tiny muted" style="margin-top:4px">${sum.unvalued_findings} more with no stated amount</div></div>
+    <div class="stat"><span class="n">${sum.total}</span><span class="l">Open findings</span></div>
+    <div class="stat"><span class="n">${sum.needs_owner}</span><span class="l">Need you</span></div>
+    <div class="stat"><span class="n">${r.commitments.overdue}</span><span class="l">Overdue promises</span>
+      <div class="tiny muted" style="margin-top:4px">${r.commitments.kept} kept</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">What needs you today</h2>
+      <button class="ghost" onclick="showBrief()">Read the brief</button>
+    </div>
+    <div id="briefOut"></div>
+    ${r.today.length? r.today.map(f=>findingCard(f)).join('')
+      : '<p class="muted small">Nothing needs your personal attention right now.</p>'}
+    ${sum.total>r.today.length?`<button class="ghost" onclick="go('feed')">See all ${sum.total} findings →</button>`:''}
+  </div>
+
+  ${r.inventory && r.inventory.active?`<div class="card">
+    <h2>The lot</h2>
+    <div class="row small muted">
+      <span><strong style="color:var(--ink)">${r.inventory.active}</strong> active units</span>
+      ${r.inventory.total_cost_cents?`<span><strong style="color:var(--ink)">${money(r.inventory.total_cost_cents)}</strong> of cost carried</span>`:''}
+      <span><strong style="color:var(--ink)">${r.inventory.aged_90}</strong> aged 90+ days</span>
+      ${r.inventory.no_cost?`<span class="muted">${r.inventory.no_cost} without a cost in the export</span>`:''}
+    </div>
+    <button class="ghost" style="margin-top:8px" onclick="go('inventory')">See the lot →</button>
+  </div>`:''}
+  <div class="card">
+    <h2>Business memory</h2>
+    <div class="row small muted">
+      <span><strong style="color:var(--ink)">${r.memory.people}</strong> people</span>
+      <span><strong style="color:var(--ink)">${r.memory.companies}</strong> companies</span>
+      <span><strong style="color:var(--ink)">${r.memory.conversations}</strong> conversations</span>
+      <span><strong style="color:var(--ink)">${r.memory.messages}</strong> messages</span>
+    </div>
+  </div>`;
+}
+function bandLabel(b){return {excellent:"Excellent control",controlled:"Controlled",
+  moderate:"Moderate chaos",high:"High chaos",critical:"Critical chaos"}[b]||b;}
+
+function findingCard(f){
+  return `<button class="finding" onclick="openFinding(${f.id})">
+    <div class="row" style="justify-content:space-between">
+      <span class="pill ${esc(f.severity)}">${esc(f.severity)}</span>
+      <span class="att" title="Attention score">${f.attention}</span>
+    </div>
+    <div class="ft">${esc(f.title)}</div>
+    <div class="small muted">${esc(f.summary||'')}</div>
+    <div class="row tiny muted" style="margin-top:7px">
+      ${f.impact_cents?`<span><strong style="color:var(--ink)">${money(f.impact_cents)}</strong></span>`
+        :`<span>value unknown</span>`}
+      <span>${Math.round((f.confidence||0)*100)}% confidence</span>
+      ${f.owner?`<span>${esc(f.owner)}</span>`:''}
+      <span>${esc(f.detector||'')}</span>
+    </div>
+  </button>`;
+}
+
+async function renderFeed(r){
+  const counts=r.summary.by_category||{};
+  const cats=Object.keys(counts);
+  let work={workload:[]};
+  try{ work=await api(`/api/orgs/${State.org.id}/workload`); }catch(e){}
+  $('#main').innerHTML=`
+  ${work.workload && work.workload.length>1?`<div class="card">
+    <h2>Where the open work sits</h2>
+    <p class="muted small">Grouped by who owns it. This is about work that is
+      unresolved, not about people — use it to rebalance, not to rank.</p>
+    <table><thead><tr><th>Owner</th><th>Open</th><th>Identified value</th><th>Kinds</th></tr></thead>
+    <tbody>${work.workload.map(w=>`<tr>
+      <td><strong>${esc(w.label)}</strong></td>
+      <td>${w.total}</td>
+      <td class="small muted">${w.impact_cents?money(w.impact_cents):'—'}</td>
+      <td class="small muted">${Object.entries(w.by_category).map(([c,n])=>esc(label(c))+' '+n).join(' · ')}</td>
+    </tr>`).join('')}</tbody></table>
+  </div>`:''}
+  <div class="card">
+    <h1>${esc(State.brand.feed_name)}</h1>
+    <p class="muted small">Ranked by what actually matters — impact, urgency, how recoverable it still is,
+      and how sure we are. Not by date.</p>
+    <div class="row" style="margin:14px 0">
+      <button class="${!State.cat?'primary':''}" onclick="setCat(null)">All ${r.summary.total}</button>
+      ${cats.map(c=>`<button class="${State.cat===c?'primary':''}" onclick="setCat('${esc(c)}')">${esc(label(c))} ${counts[c]}</button>`).join('')}
+    </div>
+    <div id="feedList">${(r.findings||[]).filter(f=>!State.cat||f.category===State.cat).map(findingCard).join('')
+      || '<p class="muted">Nothing here.</p>'}</div>
+    ${r.findings_withheld?`<div class="banner" style="margin-top:12px">${r.findings_withheld} more
+      findings are available on a paid plan.</div>`:''}
+  </div>`;
+}
+function label(c){return {revenue:"Revenue",client_communication:"Clients",commitments:"Promises",
+  client_problems:"Problems",digital:"Digital"}[c]||c;}
+function setCat(c){State.cat=c;render();}
+window.setCat=setCat;
+
+async function openFinding(id){
+  const [d, w] = await Promise.all([
+    api(`/api/orgs/${State.org.id}/findings/${id}`),
+    api(`/api/orgs/${State.org.id}/workload`).catch(()=>({members:[]}))]);
+  const f=d.finding, ev=d.evidence||[];
+  const members=w.members||[];
+  const modal=document.createElement('div'); modal.className='modal';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  modal.innerHTML=`<div class="card">
+    <div class="row" style="justify-content:space-between">
+      <span class="pill ${esc(f.severity)}">${esc(f.severity)}</span>
+      <button class="ghost" onclick="this.closest('.modal').remove()">Close ✕</button>
+    </div>
+    <h1 style="margin-top:12px">${esc(f.title)}</h1>
+    <p class="muted">${esc(f.summary||'')}</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(125px,1fr));margin:16px 0">
+      <div class="stat"><span class="n" style="font-size:19px">${f.impact_cents?money(f.impact_cents):'Unknown'}</span>
+        <span class="l">Value</span>
+        <div class="tiny muted">${esc(f.impact_basis||'No amount was stated in the conversation.')}</div></div>
+      <div class="stat"><span class="n" style="font-size:19px">${Math.round((f.confidence||0)*100)}%</span>
+        <span class="l">Confidence</span></div>
+      <div class="stat"><span class="n" style="font-size:19px">${f.attention}</span>
+        <span class="l">Attention</span></div>
+    </div>
+    <h2>Why we flagged this</h2>
+    <ul class="ev">${ev.map(e=>`<li>
+      <div class="when">${esc(when(e.occurred_at))}</div>
+      <div class="lab">${esc(e.label||'')}</div>
+      <div class="det">${esc(e.detail||'')}</div></li>`).join('')}</ul>
+    ${f.recommended_action?`<div class="ok" style="margin-top:8px"><strong>Recommended:</strong> ${esc(f.recommended_action)}</div>`:''}
+    <div class="row" style="margin-top:18px">
+      ${members.length?`<label class="small muted" style="display:flex;align-items:center;gap:7px">
+        Owner
+        <select onchange="assignFinding(${f.id},this.value)" style="width:auto">
+          <option value="">Unassigned</option>
+          ${members.map(m=>`<option value="${m.id}" ${f.assigned_to===m.id?'selected':''}>${esc(m.name||m.email)}</option>`).join('')}
+        </select></label>`:''}
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" onclick="statusFinding(${f.id},'resolved',this)">Mark resolved</button>
+      ${f.ai_actionable?`<button onclick="draftReply(${f.id})">Draft a reply</button>`:''}
+      <button onclick="statusFinding(${f.id},'reviewing',this)">I'm on it</button>
+      <button class="ghost" onclick="markFP(${f.id},this)">This isn't right</button>
+    </div>
+    <div id="fdOut"></div>
+    <p class="tiny muted" style="margin-top:14px">Detector <code>${esc(f.detector||'')}</code> ·
+      first detected ${esc(ago(f.detected_at))}. Telling us this is wrong improves the detector —
+      it is the signal we tune on.</p>
+  </div>`;
+  document.body.appendChild(modal);
+}
+window.openFinding=openFinding;
+
+async function assignFinding(id, userId){
+  await api(`/api/orgs/${State.org.id}/findings/${id}/assign`,{method:'POST',
+    body:JSON.stringify({user_id: userId? Number(userId): null})});
+  await loadReport();
+}
+window.assignFinding=assignFinding;
+
+async function statusFinding(id,status,btn){
+  btn.disabled=true;
+  await api(`/api/orgs/${State.org.id}/findings/${id}/status`,{method:'POST',
+    body:JSON.stringify({status})});
+  document.querySelector('.modal')?.remove();
+  await loadReport(); render();
+}
+window.statusFinding=statusFinding;
+async function markFP(id,btn){
+  btn.disabled=true;
+  const note=prompt("What did we get wrong? (optional)")||"";
+  await api(`/api/orgs/${State.org.id}/findings/${id}/feedback`,{method:'POST',
+    body:JSON.stringify({verdict:'false_positive',note})});
+  document.querySelector('.modal')?.remove();
+  await loadReport(); render();
+}
+window.markFP=markFP;
+async function draftReply(id){
+  $('#fdOut').innerHTML=`<div style="margin-top:12px"><span class="spin"></span> Drafting…</div>`;
+  try{
+    const r=await api(`/api/orgs/${State.org.id}/findings/${id}/draft`,{method:'POST'});
+    const d=r.draft;
+    $('#fdOut').innerHTML = d.status==='OK'
+      ? `<div style="margin-top:12px"><textarea rows="7">${esc(d.text)}</textarea>
+         <p class="tiny muted">${esc(r.note)}</p></div>`
+      : `<div class="banner" style="margin-top:12px">Drafting needs an AI key configured
+         (${esc(d.status)}). Findings and scoring work without one.</div>`;
+  }catch(e){ $('#fdOut').innerHTML=`<div class="err" style="margin-top:12px">${esc(e.message)}</div>`; }
+}
+window.draftReply=draftReply;
+
+async function runScan(){
+  const btn=$('#scanBtn'); btn.disabled=true;
+  const out=$('#scanProgress');
+  out.innerHTML=`<div style="margin-top:12px"><span class="spin"></span> <span id="stepTxt">Starting…</span></div>`;
+  const {scan_id}=await api(`/api/orgs/${State.org.id}/scan`,{method:'POST'});
+  const poll=setInterval(async()=>{
+    const {scan}=await api(`/api/orgs/${State.org.id}/scan/${scan_id}`);
+    $('#stepTxt') && ($('#stepTxt').textContent=`${scan.step||'Working'} (${scan.progress||0}%)`);
+    if(scan.status==='done'||scan.status==='error'){
+      clearInterval(poll); btn.disabled=false;
+      if(scan.status==='error') out.innerHTML=`<div class="err" style="margin-top:12px">${esc(scan.error||'Scan failed')}</div>`;
+      else out.innerHTML='';
+      await loadReport(); render();
+    }
+  },900);
+}
+window.runScan=runScan;
+
+async function showBrief(){
+  const out=$('#briefOut');
+  if(out.dataset.open==='1'){ out.innerHTML=''; out.dataset.open='0'; return; }
+  out.innerHTML=`<div style="margin-top:10px"><span class="spin"></span> Writing…</div>`;
+  const r=await api(`/api/orgs/${State.org.id}/brief`);
+  out.dataset.open='1';
+  out.innerHTML=`<pre style="margin-top:12px;white-space:pre-wrap;font:inherit;
+    background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:15px">${esc(r.text)}</pre>
+    <p class="tiny muted">Assembled from the same counted facts as the dashboard. No
+    model wrote this, so it cannot claim anything the evidence doesn't support.</p>`;
+}
+window.showBrief=showBrief;
+
+async function renderCommitments(){
+  const {commitments}=await api(`/api/orgs/${State.org.id}/commitments`);
+  const g=s=>commitments.filter(c=>c.state===s);
+  $('#main').innerHTML=`<div class="card">
+    <h1>Commitments</h1>
+    <p class="muted small">Every promise we could find in your outgoing email — including the ones
+      that were kept. A register that only lists failures is a complaints log.</p>
+    ${['overdue','open','likely_fulfilled'].map(s=>{
+      const rows=g(s); if(!rows.length) return '';
+      return `<h2 style="margin-top:20px">${{overdue:'Past due',open:'Open',
+        likely_fulfilled:'Looks handled'}[s]} · ${rows.length}</h2>
+      <table><thead><tr><th>Promise</th><th>Due</th><th>Who</th><th>Confidence</th></tr></thead>
+      <tbody>${rows.map(c=>`<tr>
+        <td>${esc(c.quote||'')}</td>
+        <td class="small muted">${c.due_at?esc(when(c.due_at)):'no date given'}
+          ${c.due_basis?`<div class="tiny">${esc(c.due_basis)}</div>`:''}</td>
+        <td class="small muted">${esc(c.promiser||'')}</td>
+        <td class="small">${Math.round((c.confidence||0)*100)}%</td></tr>`).join('')}</tbody></table>`;
+    }).join('')}
+    ${commitments.length?'':'<p class="muted">No commitments detected yet. Connect a mailbox and run a scan.</p>'}
+  </div>`;
+}
+
+async function renderInventory(){
+  let d={vehicles:[],stats:{}};
+  try{ d=await api(`/api/orgs/${State.org.id}/inventory`); }catch(e){}
+  const st=d.stats||{}, vs=d.vehicles||[];
+  $('#main').innerHTML=`
+  <div class="card">
+    <h1>Inventory</h1>
+    <p class="muted small">Loaded from your DealerCenter <strong>Active Inventory</strong> export.
+      Cost is what turns this from a list of cars into a picture of your money — we read
+      <code>VehicleCost</code> and add <code>ReconCost</code> when it's there.</p>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" onclick="showUpload()">Upload DealerCenter export</button>
+      ${vs.length?`<span class="small muted">${vs.length} units loaded</span>`:''}
+    </div>
+    <div id="uploadBox"></div>
+  </div>
+  ${vs.length?`
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
+    <div class="stat"><span class="n">${st.active||0}</span><span class="l">Active units</span></div>
+    <div class="stat"><span class="n">${st.total_cost_cents?money(st.total_cost_cents):'—'}</span>
+      <span class="l">Cost on the lot</span>
+      ${st.no_cost?`<div class="tiny muted" style="margin-top:4px">${st.no_cost} without a cost — this is a floor</div>`:''}</div>
+    <div class="stat"><span class="n">${st.aged_90||0}</span><span class="l">Aged 90+ days</span>
+      ${st.aged_capital_cents?`<div class="tiny muted" style="margin-top:4px">${money(st.aged_capital_cents)} tied up</div>`:''}</div>
+    <div class="stat"><span class="n">${st.unsellable||0}</span><span class="l">Not shoppable</span>
+      <div class="tiny muted" style="margin-top:4px">no price or no photos</div></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>The lot</h2>
+    <table><thead><tr><th>Unit</th><th>Days</th><th>Price</th><th>Cost</th><th>Margin</th><th>Status</th></tr></thead>
+    <tbody>${vs.map(v=>{
+      const name=[v.year,v.make,v.model].filter(Boolean).join(' ')||v.vin||'—';
+      const aged=(v.days_in_stock||0)>=90;
+      const neg=v.margin_pct!==null&&v.margin_pct<0;
+      return `<tr>
+        <td><strong>${esc(name)}</strong>
+          <div class="tiny muted">${esc(v.stock_no||'')}${v.vin?' · '+esc(v.vin.slice(-8)):''}</div></td>
+        <td class="small ${aged?'':'muted'}" ${aged?'style="color:var(--crit);font-weight:600"':''}>${v.days_in_stock??'—'}</td>
+        <td class="small">${v.price_cents?money(v.price_cents):'<span class="muted">no price</span>'}</td>
+        <td class="small">${v.cost_cents!=null?money(v.cost_cents):'<span class="muted">not in export</span>'}</td>
+        <td class="small" ${neg?'style="color:var(--crit);font-weight:600"':''}>${v.margin_pct!==null&&v.margin_pct!==undefined?v.margin_pct+'%':'—'}</td>
+        <td class="small muted">${esc(v.status||'')}${v.photo_count?'':' · no photos'}</td>
+      </tr>`;}).join('')}</tbody></table>
+  </div>`:`<div class="card"><p class="muted">No inventory loaded yet. Upload your export above,
+    or <a href="#" onclick="makeDealerDemo();return false">see it with a sample dealership</a>.</p></div>`}`;
+}
+
+function showUpload(){
+  $('#uploadBox').innerHTML=`
+  <div class="card" style="margin-top:16px">
+    <h2>Upload your export</h2>
+    <p class="small muted">In DealerCenter: <strong>Inventory → Active Inventory → Export</strong>.
+      CSV or XML. Make sure the cost column is included — without it we can show you
+      which cars are old but not what they're costing you.</p>
+    <input type="file" accept=".csv,.txt,.tsv,.xml" onchange="pickFile(event)" style="margin-top:12px">
+    <div id="upOut"></div>
+  </div>`;
+}
+window.showUpload=showUpload;
+
+let _pendingCsv=null, _pendingName=null, _pendingRecon=null;
+async function pickFile(e){
+  const file=e.target.files&&e.target.files[0];
+  if(!file) return;
+  $('#upOut').innerHTML=`<div style="margin-top:12px"><span class="spin"></span> Reading ${esc(file.name)}…</div>`;
+  _pendingCsv=await file.text(); _pendingName=file.name; _pendingRecon=null;
+  await runPreview();
+}
+window.pickFile=pickFile;
+
+// Re-previewing on a changed cost basis rather than only relabelling it: the
+// coverage counts and the sample rows have to agree with the arithmetic shown.
+async function setRecon(v){ _pendingRecon=v; await runPreview(); }
+window.setRecon=setRecon;
+
+async function runPreview(){
+  try{
+    const body={content:_pendingCsv,filename:_pendingName};
+    if(_pendingRecon!==null) body.add_recon=_pendingRecon;
+    const {preview:p}=await api(`/api/orgs/${State.org.id}/inventory/preview`,
+      {method:'POST',body:JSON.stringify(body)});
+    const cov=p.coverage||{}, cb=p.cost_basis||{};
+    $('#upOut').innerHTML=`
+      <div class="${p.warnings&&p.warnings.length?'banner':'ok'}" style="margin-top:14px">
+        Found <strong>${p.vehicles}</strong> vehicles in ${esc(p.format.toUpperCase())}.
+        ${cov.with_cost} have a cost, ${cov.with_price} have a price,
+        ${cov.with_date_in_stock} have a date in stock.
+      </div>
+      ${(p.warnings||[]).map(w=>`<div class="err" style="margin-top:8px">${esc(w)}</div>`).join('')}
+      ${cb.sentence?`<div class="small" style="margin-top:12px"><strong>How we read your money:</strong>
+        <span id="costBasis">${esc(cb.sentence)}</span></div>`:''}
+      ${cb.recon_column?`<div class="tiny muted" id="reconFlip" style="margin-top:6px">
+        Not how your export works?
+        <a href="#" onclick="setRecon(${cb.recon_added?'false':'true'});return false">
+        ${cb.recon_added
+          ? `My ${esc(cb.cost_column)} already has recon in it`
+          : `My recon is separate from ${esc(cb.cost_column)}`}</a> —
+        getting this backwards moves every margin we show you.</div>`:''}
+      <div class="small muted" style="margin-top:12px">
+        <strong>Columns we understood:</strong>
+        ${Object.entries(p.understood||{}).map(([c,k])=>`${esc(c)} → ${esc(k)}`).join(' · ')||'none'}
+      </div>
+      ${(p.ignored||[]).length?`<div class="tiny muted" style="margin-top:6px">
+        Ignored: ${p.ignored.map(esc).join(', ')}</div>`:''}
+      <div class="row" style="margin-top:16px">
+        <button class="primary" onclick="doImport(this)">Import ${p.vehicles} vehicles</button>
+        <button class="ghost" onclick="$('#upOut').innerHTML='';">Cancel</button>
+      </div>`;
+  }catch(err){ $('#upOut').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
+}
+
+async function doImport(btn){
+  btn.disabled=true;
+  $('#upOut').insertAdjacentHTML('beforeend',
+    `<div id="impMsg" style="margin-top:12px"><span class="spin"></span> Importing…</div>`);
+  try{
+    const ibody={content:_pendingCsv,filename:_pendingName};
+    if(_pendingRecon!==null) ibody.add_recon=_pendingRecon;
+    const r=await api(`/api/orgs/${State.org.id}/inventory/import`,
+      {method:'POST',body:JSON.stringify(ibody)});
+    $('#impMsg').innerHTML=`<div class="ok">Imported ${r.imported} vehicles
+      (${r.created} new, ${r.updated} updated). Running a scan…</div>`;
+    await api(`/api/orgs/${State.org.id}/scan`,{method:'POST'});
+    setTimeout(async()=>{ await loadReport(); go('home'); }, 2500);
+  }catch(err){ $('#impMsg').innerHTML=`<div class="err">${esc(err.message)}</div>`; }
+}
+window.doImport=doImport;
+
+async function makeDealerDemo(){
+  const r=await api('/api/demo/dealer',{method:'POST'});
+  State.orgs.push(r.org); State.tab='home'; await pickOrg(r.org.id);
+}
+window.makeDealerDemo=makeDealerDemo;
+
+async function renderMemory(){
+  const [{entities},{candidates}] = await Promise.all([
+    api(`/api/orgs/${State.org.id}/entities?limit=200`),
+    api(`/api/orgs/${State.org.id}/merge-candidates`)]);
+  $('#main').innerHTML=`
+  ${candidates.length?`<div class="card">
+    <h2>Possible duplicates</h2>
+    <p class="muted small">We think these may be the same person. We never merge automatically —
+      a wrong merge fuses two customers' histories together.</p>
+    ${candidates.map(c=>`<div style="border-top:1px solid var(--line);padding:13px 0">
+      <div class="row" style="justify-content:space-between">
+        <div><strong>${esc(c.a.name)}</strong> <span class="muted small">${esc(c.a.emails.join(', '))}</span>
+          <span class="muted">·</span> <strong>${esc(c.b.name)}</strong>
+          <span class="muted small">${esc(c.b.emails.join(', '))}</span>
+          <div class="tiny muted">${esc(c.reasons.join(' · '))} — ${Math.round(c.confidence*100)}% confident</div></div>
+        <div class="row">
+          <button class="primary" onclick="mergeEnt(${c.a.id},${c.b.id})">Same person</button>
+          <button class="ghost" onclick="notSame(${c.a.id},${c.b.id})">Not the same</button></div>
+      </div></div>`).join('')}
+  </div>`:''}
+  <div class="card">
+    <h1>Business memory</h1>
+    <p class="muted small">Everyone we have seen, resolved into one record per person.</p>
+    <table><thead><tr><th>Name</th><th>Type</th><th>Role</th><th>Last seen</th></tr></thead>
+    <tbody>${entities.map(e=>`<tr>
+      <td><strong>${esc(e.display_name||'')}</strong></td>
+      <td class="muted small">${esc(e.kind)}</td>
+      <td class="muted small">${esc(e.role||'')}</td>
+      <td class="muted small">${esc(ago(e.last_seen_at))}</td></tr>`).join('')}</tbody></table>
+  </div>`;
+}
+async function mergeEnt(a,b){ await api(`/api/orgs/${State.org.id}/merge`,{method:'POST',
+  body:JSON.stringify({keep_id:a,drop_id:b})}); renderMemory(); }
+async function notSame(a,b){ await api(`/api/orgs/${State.org.id}/not-same`,{method:'POST',
+  body:JSON.stringify({a_id:a,b_id:b})}); renderMemory(); }
+window.mergeEnt=mergeEnt; window.notSame=notSame;
+
+async function renderConnect(){
+  const d=await api(`/api/orgs/${State.org.id}/integrations`);
+  const connected=Object.fromEntries((d.integrations||[]).map(i=>[i.kind,i]));
+  $('#main').innerHTML=`
+  <div class="card">
+    <h1>Connections</h1>
+    <p class="muted small">Each one you connect turns on a category of intelligence we can't
+      see otherwise. We say exactly what's missing rather than guessing.</p>
+    <div class="${(d.jobs||[]).some(j=>j.status==='error')?'err':'ok'}" style="margin-top:12px">
+      ${d.scheduler&&d.scheduler.enabled
+        ? `Monitoring is on — we re-check every ${d.scheduler.interval_hours} hours.`
+        : `Monitoring is off. Scans only run when you press “Run a scan”.`}
+      ${(d.jobs||[]).length
+        ? ` Last run ${esc(ago(d.jobs[0].finished_at||d.jobs[0].started_at))}: ${esc(d.jobs[0].status)}${d.jobs[0].detail?' — '+esc(d.jobs[0].detail):''}.`
+        : ' No scheduled run yet.'}
+    </div>
+    ${!d.secrets_ready?`<div class="banner" style="margin-top:12px">Credentials cannot be stored:
+      ${esc(d.secrets_status)}</div>`:''}
+    ${d.available.map(a=>{
+      const c=connected[a.kind];
+      return `<div style="border-top:1px solid var(--line);padding:15px 0">
+        <div class="row" style="justify-content:space-between">
+          <div><strong>${esc(a.label)}</strong>
+            ${c?`<span class="pill low" style="margin-left:8px">${esc(c.status)}</span>`
+               :(a.status==='planned'?`<span class="pill low" style="margin-left:8px">coming soon</span>`:'')}
+            <div class="small muted">${esc(a.unlocks)}</div>
+            ${a.note?`<div class="tiny muted">${esc(a.note)}</div>`:''}
+            ${c&&c.last_sync_at?`<div class="tiny muted">Last sync ${esc(ago(c.last_sync_at))}</div>`:''}
+            ${c&&c.last_error?`<div class="tiny" style="color:var(--crit)">${esc(c.last_error)}</div>`:''}
+          </div>
+          <div>${a.kind==='imap'
+            ? (c?`<button class="ghost" onclick="disconnectInt('imap')">Disconnect</button>`
+                :`<button class="primary" onclick="showMailbox()" ${d.secrets_ready?'':'disabled'}>Connect</button>`)
+            : a.kind==='dealercenter'
+            ? `<button class="primary" onclick="go('inventory')">${c?'Upload again':'Upload export'}</button>`
+            : `<button disabled>Not yet</button>`}</div>
+        </div></div>`;
+    }).join('')}
+    <div id="mailboxForm"></div>
+  </div>
+  ${(d.jobs||[]).length?`<div class="card">
+    <h2>Sync history</h2>
+    <p class="muted small">Every scheduled run, successful or not. We would rather show you
+      a broken sync than let you believe you are being watched when you aren't.</p>
+    <table><thead><tr><th>When</th><th>Job</th><th>Result</th><th>Detail</th></tr></thead>
+    <tbody>${d.jobs.map(j=>`<tr>
+      <td class="small muted">${esc(when(j.finished_at||j.started_at))}</td>
+      <td class="small">${esc(j.job)}</td>
+      <td class="small"><span class="pill ${j.status==='error'?'critical':'low'}">${esc(j.status)}</span></td>
+      <td class="small muted">${esc(j.detail||'')}</td></tr>`).join('')}</tbody></table>
+  </div>`:''}`;
+}
+function showMailbox(){
+  $('#mailboxForm').innerHTML=`
+  <div class="card" style="margin-top:16px">
+    <h2>Connect your mailbox</h2>
+    <p class="small muted">Use an <strong>app password</strong>, not your normal password.
+      Gmail: Google Account → Security → 2-Step Verification → App passwords.
+      Microsoft 365: your admin can issue one. We only ever read.</p>
+    <form class="grid" onsubmit="connectMailbox(event)" style="margin-top:12px">
+      <label>Email address<input name="email" type="email" required placeholder="you@yourcompany.com"></label>
+      <label>App password<input name="password" type="password" required></label>
+      <details><summary class="small muted">Advanced (IMAP host and port)</summary>
+        <div class="row" style="margin-top:8px">
+          <input name="host" placeholder="imap.yourcompany.com" style="flex:2">
+          <input name="port" placeholder="993" style="flex:1"></div></details>
+      <div class="row"><button class="primary">Connect and test</button>
+        <button type="button" class="ghost" onclick="testMailbox(event)">Test only</button></div>
+    </form>
+    <div id="mbOut"></div>
+  </div>`;
+}
+window.showMailbox=showMailbox;
+function mbBody(f){ return JSON.stringify({email:f.email.value,password:f.password.value,
+  host:f.host.value||null,port:f.port.value?parseInt(f.port.value):null}); }
+async function testMailbox(e){
+  const f=e.target.closest('form');
+  $('#mbOut').innerHTML=`<div style="margin-top:12px"><span class="spin"></span> Testing…</div>`;
+  try{ const r=await api(`/api/orgs/${State.org.id}/integrations/imap/check`,
+        {method:'POST',body:mbBody(f)});
+    $('#mbOut').innerHTML=`<div class="${r.ok?'ok':'err'}" style="margin-top:12px">${esc(r.detail)}</div>`;
+  }catch(err){ $('#mbOut').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
+}
+window.testMailbox=testMailbox;
+async function connectMailbox(e){
+  e.preventDefault(); const f=e.target;
+  $('#mbOut').innerHTML=`<div style="margin-top:12px"><span class="spin"></span> Connecting…</div>`;
+  try{
+    await api(`/api/orgs/${State.org.id}/integrations/imap`,{method:'POST',body:mbBody(f)});
+    await renderConnect(); go('home'); runScan();
+  }catch(err){ $('#mbOut').innerHTML=`<div class="err" style="margin-top:12px">${esc(err.message)}</div>`; }
+}
+window.connectMailbox=connectMailbox;
+async function disconnectInt(k){
+  if(!confirm('Disconnect '+k+'? Data already analyzed stays until you delete it.')) return;
+  await api(`/api/orgs/${State.org.id}/integrations/${k}`,{method:'DELETE'}); renderConnect();
+}
+window.disconnectInt=disconnectInt;
+
+async function renderTrust(){
+  const [t,q] = await Promise.all([
+    api(`/api/orgs/${State.org.id}/transparency`),
+    api(`/api/orgs/${State.org.id}/quality`)]);
+  const dets=Object.entries(q.detectors||{});
+  $('#main').innerHTML=`
+  <div class="card">
+    <h1>What we read, and what we don't</h1>
+    ${t.integrations.map(i=>`<div style="border-top:1px solid var(--line);padding:15px 0">
+      <h2>${esc(i.kind)}</h2>
+      <table><tbody>
+        <tr><td class="muted small" style="width:33%">What we read</td><td>${esc(i.reads)}</td></tr>
+        <tr><td class="muted small">Why</td><td>${esc(i.why)}</td></tr>
+        <tr><td class="muted small">What we store</td><td>${esc(i.stores)}</td></tr>
+        <tr><td class="muted small">What we never store</td><td>${esc(i.does_not_store)}</td></tr>
+        <tr><td class="muted small">What we can do</td><td>${esc(i.can_do)}</td></tr>
+        <tr><td class="muted small">How to revoke</td><td>${esc(i.revoke)}</td></tr>
+      </tbody></table></div>`).join('')}
+  </div>
+  <div class="card">
+    <h2>How often we're wrong</h2>
+    <p class="muted small">Your own false-positive rate per detector. We show it because a
+      product that decides what deserves your attention has to be accountable for it.</p>
+    ${dets.length?`<table><thead><tr><th>Detector</th><th>Useful</th><th>Wrong</th><th>Rate</th></tr></thead>
+      <tbody>${dets.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.useful}</td>
+      <td>${v.false_positive}</td><td>${v.fp_rate==null?'—':Math.round(v.fp_rate*100)+'%'}</td></tr>`).join('')}
+      </tbody></table>`:'<p class="muted small">No feedback yet. Use “This isn’t right” on any finding.</p>'}
+  </div>
+  <div class="card">
+    <h2>Your data</h2>
+    <p class="small muted">Deleting removes every ingested message, entity, finding and score for
+      this business. It cannot be undone.</p>
+    <button onclick="wipe()" style="color:var(--crit);border-color:var(--crit)">Delete all business data</button>
+  </div>`;
+}
+async function wipe(){
+  if(!confirm('Delete ALL ingested data for this business? This cannot be undone.')) return;
+  await api(`/api/orgs/${State.org.id}/data`,{method:'DELETE'});
+  await loadReport(); go('home');
+}
+window.wipe=wipe;
+
+boot();
+</script>
+</body>
+</html>

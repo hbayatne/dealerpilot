@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Unit and integration tests
+        env:
+          CHAOS_DISABLE_SCHEDULER: "1"
+        run: python -m unittest discover -s tests -v
+
+  finding-quality:
+    # The detectors are the product. A change that keeps the unit tests green
+    # while quietly degrading precision is the regression that matters most, so
+    # both corpora gate the merge in their own right.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Labelled corpus — precision and recall
+        run: python3 tools/accuracy.py
+
+      - name: Adversarial corpus — the patterns that break naive detectors
+        run: python3 tools/adversarial.py
+
+  app-boots:
+    # Catches the class of mistake unit tests miss entirely: an import cycle, a
+    # bad route decorator, a missing static file. The app either serves its own
+    # health endpoint and dashboard or it doesn't.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Boot and probe
+        env:
+          CHAOS_SECRET_KEY: ci-test-key
+          CHAOS_DB: /tmp/ci-chaos.db
+          CHAOS_DISABLE_SCHEDULER: "1"
+        run: |
+          python3 -m uvicorn chaos.app:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/api/health | tee /dev/stderr | grep -q '"ok":true'
+          curl -sf http://127.0.0.1:8000/ | grep -q '<title>'
+          # The public scan endpoint must refuse a private target, always.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://127.0.0.1:8000/api/scan/website \
+            -H 'Content-Type: application/json' \
+            -d '{"url":"http://169.254.169.254/"}')
+          test "$code" = "400" || { echo "SSRF guard did not reject: HTTP $code"; exit 1; }
