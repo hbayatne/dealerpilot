@@ -7,7 +7,7 @@
  */
 
 import { renderGoof } from './characters.js';
-import { VOICES, playClip, speak, startRecording, blobToDataUrl, canRecord } from './voice.js';
+import { VOICES, MAX_RECORD_MS, playClip, speak, startRecording, blobToDataUrl, canRecord } from './voice.js';
 import { h, clear, toast, popText } from './ui.js';
 import { play } from './sfx.js';
 
@@ -33,7 +33,7 @@ export function renderTalkBooth(mount, { character, party, onBack }) {
 
   const recordBtn = h('button', { class: 'talk-record' },
     h('span', { class: 'talk-record-emoji' }, '\u{1F3A4}'),
-    h('span', { class: 'talk-record-label' }, canRecord() ? 'HOLD AND TALK' : 'MIC NEEDS HTTPS'));
+    h('span', { class: 'talk-record-label' }, canRecord() ? 'HOLD AND TALK' : 'NO MIC \u{2014} TYPE BELOW'));
 
   const timerRing = h('div', { class: 'talk-timer' });
   recordBtn.append(timerRing);
@@ -75,55 +75,96 @@ export function renderTalkBooth(mount, { character, party, onBack }) {
   async function replay() {
     if (!lastClip || busy) return;
     busy = true;
-    await playClip(lastClip, voiceId, (level) => draw('talk', level));
-    draw('idle');
-    busy = false;
+    try {
+      await playClip(lastClip, voiceId, (level) => draw('talk', level));
+    } finally {
+      // Without the finally a failed decode wedged busy on forever and the
+      // whole booth went silent until you left the screen and came back.
+      draw('idle');
+      busy = false;
+    }
   }
+
+  /**
+   * Type it and the goofball says it. This is not just a nicety: the
+   * microphone needs https, and over plain http on the home wifi there is no
+   * recording at all — without this the whole repeat-after-me idea is dead on
+   * the boys' iPads. speechSynthesis needs no permission and no secure page.
+   */
+  const typeInput = h('input', {
+    class: 'name-input', type: 'text', maxlength: '80',
+    placeholder: 'Type something silly...'
+  });
+  const sayTyped = () => {
+    const text = typeInput.value.trim();
+    if (!text || busy) return;
+    busy = true;
+    play('select');
+    speak(text, voiceId, (level) => draw('talk', level)).finally(() => {
+      draw('idle');
+      busy = false;
+    });
+  };
+  typeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sayTyped(); });
+  const typeRow = h('div', { class: 'row tight' },
+    typeInput,
+    h('button', { class: 'mini-btn', onclick: sayTyped }, '\u{1F5E3} SAY IT'));
 
   /* hold to record */
   let recorder = null;
   let countdown = null;
 
-  async function beginRecording(e) {
+  function stopTimerRing() {
+    clearInterval(countdown);
+    recordBtn.classList.remove('is-recording');
+    timerRing.style.setProperty('--fill', '0');
+  }
+
+  function beginRecording(e) {
     e.preventDefault();
     if (!canRecord()) {
-      toast('Recording needs https. Everything else still works!', '\u{1F512}');
+      toast('The microphone needs https \u{2014} type it instead!', '\u{2328}');
+      typeInput.focus();
       return;
     }
     if (recorder) return;
-    try {
-      recordBtn.classList.add('is-recording');
-      let elapsed = 0;
-      countdown = setInterval(() => {
-        elapsed += 100;
-        timerRing.style.setProperty('--fill', String(Math.min(1, elapsed / 5000)));
-      }, 100);
 
-      recorder = await startRecording(async (blob) => {
-        clearInterval(countdown);
-        recordBtn.classList.remove('is-recording');
-        timerRing.style.setProperty('--fill', '0');
-        recorder = null;
-        if (!blob) { toast('Too quiet! Say it louder.', '\u{1F442}'); return; }
-        lastClip = await blobToDataUrl(blob);
-        if (party?.status === 'joined') party.send({ type: 'voice', clip: lastClip });
-        replay();
-      });
-    } catch {
-      recordBtn.classList.remove('is-recording');
+    // Hold the pointer to this button for the whole gesture, so sliding a
+    // thumb off mid-sentence no longer chops the recording in half.
+    try { recordBtn.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+
+    recordBtn.classList.add('is-recording');
+    let elapsed = 0;
+    countdown = setInterval(() => {
+      elapsed += 100;
+      timerRing.style.setProperty('--fill', String(Math.min(1, elapsed / MAX_RECORD_MS)));
+    }, 100);
+
+    recorder = startRecording(async (blob, info) => {
+      stopTimerRing();
       recorder = null;
-      toast('The microphone said no.', '\u{1F937}');
-    }
+      if (!blob) {
+        if (info.reason === 'too-short') toast('Hold it down while you talk!', '\u{1F91A}');
+        else if (info.reason === 'denied') toast('The microphone said no.', '\u{1F937}');
+        else if (info.reason !== 'cancelled') toast('That did not record. Try again!', '\u{1F507}');
+        return;
+      }
+      lastClip = await blobToDataUrl(blob);
+      if (party?.status === 'joined') party.send({ type: 'voice', clip: lastClip });
+      replay();
+    }, {
+      onError: () => { stopTimerRing(); recorder = null; toast('The microphone said no.', '\u{1F937}'); }
+    });
   }
 
-  function endRecording() {
+  function endRecording(e) {
+    try { if (e?.pointerId != null) recordBtn.releasePointerCapture(e.pointerId); } catch { /* fine */ }
     if (recorder) recorder.stop();
   }
 
   recordBtn.addEventListener('pointerdown', beginRecording);
   recordBtn.addEventListener('pointerup', endRecording);
   recordBtn.addEventListener('pointercancel', endRecording);
-  recordBtn.addEventListener('pointerleave', endRecording);
 
   clear(mount).append(
     h('div', { class: 'screen talk' },
@@ -133,6 +174,9 @@ export function renderTalkBooth(mount, { character, party, onBack }) {
         h('span', { class: 'mini-btn ghost-space' })),
       stage,
       recordBtn,
+      h('div', { class: 'lab-section' },
+        h('div', { class: 'lab-label' }, canRecord() ? 'Or type it' : 'Type it and they say it'),
+        typeRow),
       h('div', { class: 'talk-row' },
         h('button', { class: 'mini-btn wide', onclick: replay }, '\u{1F501} Say it again'),
         h('button', {
