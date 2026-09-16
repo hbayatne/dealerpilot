@@ -1,0 +1,13 @@
+{
+  "name": "Bayatneh Boys Brawl",
+  "short_name": "Bayatneh Boys",
+  "description": "Put your face on a goofball and smack your brothers around.",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#16123a",
+  "theme_color": "#16123a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
