@@ -37,39 +37,91 @@ function pickMimeType() {
 
 let activeRecorder = null;
 
+/** Anything shorter than this was a fumbled tap, not a sentence. */
+const MIN_RECORD_MS = 400;
+
 /**
- * Starts recording. Resolves with a controller you stop yourself, or that
- * stops itself after MAX_RECORD_MS.
+ * Starts recording and hands back a controller IMMEDIATELY — before the
+ * microphone has actually opened.
+ *
+ * That matters more than it looks. getUserMedia takes a moment, and the very
+ * first hold also puts a permission prompt on screen. This used to be an
+ * async function, so a kid who let go during that gap got back nothing to
+ * stop: the recorder started afterwards with no handle on it, ran the full
+ * five seconds, and then played back a take nobody asked for — and the next
+ * hold stopped that orphan instead of its own take, so every recording after
+ * it was one behind. Stopping before the stream arrives now simply cancels.
+ *
+ * @param {(blob: Blob|null, info: {ms: number, reason?: string}) => void} onStop
+ * @param {{onStart?: () => void, onError?: (err: Error) => void}} [hooks]
  */
-export async function startRecording(onStop) {
-  if (!canRecord()) throw new Error('no-mic');
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-  });
+export function startRecording(onStop, { onStart, onError } = {}) {
+  let stopped = false;          // stop() was asked for, whenever that happened
+  let settled = false;          // onStop has been called exactly once
+  let recorder = null;
+  let startedAt = 0;
 
-  const mimeType = pickMimeType();
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 48000 } : undefined);
-  const chunks = [];
-  let settled = false;
-
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = async () => {
-    stream.getTracks().forEach((t) => t.stop());
-    clearTimeout(timer);
-    activeRecorder = null;
+  const finish = (blob, info) => {
     if (settled) return;
     settled = true;
-    const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-    onStop(blob.size > 700 ? blob : null);
+    activeRecorder = null;
+    onStop(blob, info);
   };
 
-  recorder.start();
-  const timer = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, MAX_RECORD_MS);
-  activeRecorder = recorder;
+  if (!canRecord()) {
+    // Report asynchronously so the caller always gets its controller first.
+    queueMicrotask(() => onError?.(new Error('no-mic')));
+    return { stop() {}, get active() { return false; } };
+  }
+
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  }).then((stream) => {
+    // Let go while the microphone was opening: bin the stream and say nothing.
+    if (stopped) {
+      stream.getTracks().forEach((t) => t.stop());
+      finish(null, { ms: 0, reason: 'cancelled' });
+      return;
+    }
+
+    const mimeType = pickMimeType();
+    recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 48000 } : undefined);
+    const chunks = [];
+    let timer = null;
+
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearTimeout(timer);
+      const ms = Date.now() - startedAt;
+      const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+      if (ms < MIN_RECORD_MS) finish(null, { ms, reason: 'too-short' });
+      else if (!blob.size) finish(null, { ms, reason: 'empty' });
+      else finish(blob, { ms });
+    };
+    recorder.onerror = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearTimeout(timer);
+      finish(null, { ms: Date.now() - startedAt, reason: 'failed' });
+    };
+
+    startedAt = Date.now();
+    recorder.start();
+    activeRecorder = recorder;
+    onStart?.();
+    timer = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, MAX_RECORD_MS);
+  }).catch((err) => {
+    finish(null, { ms: 0, reason: 'denied' });
+    onError?.(err instanceof Error ? err : new Error('mic-failed'));
+  });
 
   return {
-    stop() { if (recorder.state === 'recording') recorder.stop(); },
-    get active() { return recorder.state === 'recording'; }
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      if (recorder && recorder.state === 'recording') recorder.stop();
+    },
+    get active() { return !stopped && Boolean(recorder) && recorder.state === 'recording'; }
   };
 }
 
@@ -136,6 +188,8 @@ export async function playClip(dataUrl, voiceId, onLevel) {
 
   /** @type {AudioNode} */
   let node = source;
+  /** Oscillators that have to be stopped when the clip finishes. */
+  const stopWithSource = [];
 
   if (voice.highpass) {
     const hp = ctx.createBiquadFilter();
@@ -162,7 +216,10 @@ export async function playClip(dataUrl, voiceId, onLevel) {
     osc.frequency.value = voice.ring;
     osc.connect(ring.gain);
     osc.start();
-    source.onended = () => osc.stop();
+    // Tracked rather than hung off source.onended: the promise below owns that
+    // handler, and assigning it there would leave this oscillator running for
+    // the rest of the session, one more every time a robot spoke.
+    stopWithSource.push(osc);
     node.connect(ring);
     node = ring;
   }
@@ -208,6 +265,9 @@ export async function playClip(dataUrl, voiceId, onLevel) {
   return new Promise((resolve) => {
     source.onended = () => {
       running = false;
+      for (const osc of stopWithSource) {
+        try { osc.stop(); } catch { /* already stopped */ }
+      }
       onLevel?.(0);
       resolve();
     };

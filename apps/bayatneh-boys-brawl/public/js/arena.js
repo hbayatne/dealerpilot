@@ -13,6 +13,7 @@ import { h, clear, popText, confetti, shake, toast } from './ui.js';
 import { play } from './sfx.js';
 import { playClip, speak, startRecording, blobToDataUrl, canRecord } from './voice.js';
 import { playMusic, duckMusic } from './music.js';
+import { recordWin, getScoreboard } from './store.js';
 
 const COMMENTARY = [
   'Ooooooh that had to sting!',
@@ -217,45 +218,52 @@ export class Arena {
   wireTaunt(button, playerId) {
     let holdTimer = null;
     let recorder = null;
-    let recording = false;
+
+    const done = () => {
+      recorder = null;
+      duckMusic(false);
+      button.classList.remove('is-recording');
+    };
 
     const startHold = (e) => {
       e.preventDefault();
-      holdTimer = setTimeout(async () => {
+      // Keep the gesture on this button even if a thumb wanders mid-taunt.
+      try { button.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+      holdTimer = setTimeout(() => {
         if (!canRecord()) return;
-        try {
-          recording = true;
-          duckMusic(true);
-          button.classList.add('is-recording');
-          recorder = await startRecording(async (blob) => {
-            recording = false;
-            duckMusic(false);
-            button.classList.remove('is-recording');
-            if (!blob) return;
-            const clip = await blobToDataUrl(blob);
-            this.broadcastVoice(playerId, clip);
-          });
-        } catch {
-          recording = false;
-          duckMusic(false);
-          button.classList.remove('is-recording');
-          toast('The microphone said no.', '\u{1F3A4}');
-        }
+        duckMusic(true);
+        button.classList.add('is-recording');
+        // startRecording hands back its controller straight away, so letting
+        // go while the microphone is still opening cancels the take instead
+        // of leaving one running that broadcasts seconds later.
+        recorder = startRecording(async (blob) => {
+          done();
+          if (!blob) return;
+          this.broadcastVoice(playerId, await blobToDataUrl(blob));
+        }, {
+          onError: () => { done(); toast('The microphone said no.', '\u{1F3A4}'); }
+        });
       }, 260);
     };
 
-    const endHold = () => {
+    const endHold = (e) => {
+      try { if (e?.pointerId != null) button.releasePointerCapture(e.pointerId); } catch { /* fine */ }
       clearTimeout(holdTimer);
-      if (recording && recorder) {
-        recorder.stop();
-      } else if (!recording) {
-        this.broadcastSay(playerId);
-      }
+      holdTimer = null;
+      // A hold stops the take; a tap is just "say my catchphrase". A hold with
+      // no microphone falls back to the catchphrase rather than doing nothing.
+      if (recorder) recorder.stop();
+      else this.broadcastSay(playerId);
     };
 
     button.addEventListener('pointerdown', startHold);
     button.addEventListener('pointerup', endHold);
-    button.addEventListener('pointercancel', () => { clearTimeout(holdTimer); duckMusic(false); recorder?.stop(); });
+    button.addEventListener('pointercancel', () => {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+      recorder?.stop();
+      done();
+    });
   }
 
   /* ------------------------------------------------------------- networking */
@@ -667,6 +675,8 @@ export class Arena {
     const winner = winnerId ? this.charactersById[winnerId] : null;
     playMusic('victory');
     play(this.controls.includes(winnerId) ? 'cheer' : 'ding');
+    recordWin(winnerId);
+    const tally = winnerId ? getScoreboard().find((row) => row.character.id === winnerId)?.wins : 0;
 
     const panel = h('div', { class: 'result' },
       h('div', { class: 'result-crown' }, '\u{1F451}'),
@@ -674,9 +684,11 @@ export class Arena {
       h('h2', {}, winner ? `${winner.name} WINS!` : 'Nobody wins!'),
       h('p', {}, winner
         ? (this.mode === 'rumble'
-            ? `${this.targetScore} bonks. ${SPECIES[winner.species].blurb}`
+            ? `${this.targetScore} ${this.targetScore === 1 ? 'bonk' : 'bonks'}. ${SPECIES[winner.species].blurb}`
             : SPECIES[winner.species].blurb)
         : 'Everybody fell over.'),
+      tally ? h('div', { class: 'result-tally' },
+        tally === 1 ? 'First win!' : `${tally} wins so far`) : null,
       h('div', { class: 'row' },
         (this.isHost || !this.party) ? h('button', { class: 'big-btn', onclick: () => this.rematch() },
           h('span', { class: 'big-btn-emoji' }, '\u{1F501}'), 'Again!') : null,

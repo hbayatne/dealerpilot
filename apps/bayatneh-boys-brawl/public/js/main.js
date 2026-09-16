@@ -217,7 +217,60 @@ function showHome() {
           : menuButton('\u{1F30D}', 'Party fight', 'Needs the home server \u{2014} ask Dad to start it', explainParty),
         menuButton('\u{1F6CB}', 'Couch rumble', 'All of you on this one screen', showCouchSetup),
         menuButton('\u{1F916}', 'Fight a robot', 'Practise on your own', startBotFight),
-        menuButton('\u{1F3A4}', 'Talk Booth', 'Make your goofball repeat you', () => showTalk(me)))));
+        menuButton('\u{1F3A4}', 'Talk Booth', 'Make your goofball repeat you', () => showTalk(me)),
+        menuButton('\u{1F3C6}', 'Scoreboard', scoreboardSub(), showScoreboard))));
+}
+
+/** "Waleed is winning" on the menu button, or a nudge if nobody has won yet. */
+function scoreboardSub() {
+  const board = store.getScoreboard();
+  const top = board[0];
+  if (!top || !top.wins) return 'Nobody has won a brawl yet';
+  const drawn = board.filter((row) => row.wins === top.wins);
+  return drawn.length > 1
+    ? `${drawn.map((row) => row.character.name).join(' and ')} are tied on ${top.wins}`
+    : `${top.character.name} is winning with ${top.wins}`;
+}
+
+/** Who has won the most brawls on this device. Brothers keep score. */
+function showScoreboard() {
+  tearDown();
+  playMusic('menu');
+  const board = store.getScoreboard();
+  const most = board[0]?.wins || 0;
+  const list = h('div', { class: 'score-list' });
+
+  board.forEach((row, index) => {
+    list.append(h('div', { class: `score-row ${row.wins && row.wins === most ? 'is-top' : ''}` },
+      h('div', { class: 'score-rank' }, row.wins && row.wins === most ? '\u{1F451}' : `${index + 1}`),
+      h('div', { class: 'score-head', html: renderHead(row.character, row.wins === most && most ? 'win' : 'idle') }),
+      h('div', { class: 'score-name' }, row.character.name),
+      h('div', { class: 'score-wins' },
+        h('strong', {}, String(row.wins)),
+        h('small', {}, row.wins === 1 ? 'win' : 'wins'))));
+  });
+
+  clear(app).append(
+    h('div', { class: 'screen' },
+      h('header', { class: 'bar' },
+        h('button', { class: 'mini-btn', onclick: showHome }, '\u{2190}'),
+        h('h1', {}, 'Scoreboard'),
+        muteButton()),
+      h('p', { class: 'hint' }, most
+        ? 'Every brawl won on this device. Winner gets the crown.'
+        : 'Win a brawl and your name goes up here.'),
+      list,
+      h('div', { class: 'lab-actions' },
+        h('button', {
+          class: 'mini-btn wide',
+          onclick: () => {
+            if (confirm('Wipe the scoreboard and start again?')) {
+              store.resetScoreboard();
+              play('boing');
+              showScoreboard();
+            }
+          }
+        }, '\u{1F9F9} Start again'))));
 }
 
 function explainParty() {

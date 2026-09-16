@@ -10,7 +10,8 @@ const DEFAULTS = {
   characters: [],
   activeId: null,
   muted: false,
-  seenIntro: false
+  seenIntro: false,
+  wins: {}        // character id -> brawls won, for the family scoreboard
 };
 
 function read() {
@@ -63,6 +64,33 @@ export function saveCharacter(character) {
 export function deleteCharacter(id) {
   state.characters = state.characters.filter((c) => c.id !== id);
   if (state.activeId === id) state.activeId = state.characters[0]?.id || null;
+  if (state.wins?.[id]) {
+    const { [id]: _gone, ...rest } = state.wins;
+    state.wins = rest;
+  }
+  write();
+}
+
+/**
+ * Tally a win. Only for goofballs saved on THIS device — in a party every
+ * device sees the same winner, and we do not want a phantom row for a brother
+ * whose character lives in his own browser.
+ */
+export function recordWin(characterId) {
+  if (!characterId || !state.characters.some((c) => c.id === characterId)) return;
+  state.wins = { ...state.wins, [characterId]: (state.wins[characterId] || 0) + 1 };
+  write();
+}
+
+/** [{ character, wins }], most wins first. Everybody appears, even on zero. */
+export function getScoreboard() {
+  return state.characters
+    .map((character) => ({ character, wins: state.wins?.[character.id] || 0 }))
+    .sort((a, b) => b.wins - a.wins || a.character.name.localeCompare(b.character.name));
+}
+
+export function resetScoreboard() {
+  state.wins = {};
   write();
 }
 
