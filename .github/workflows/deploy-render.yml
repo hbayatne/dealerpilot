@@ -1,0 +1,52 @@
+# Deploy to Render. The API key lives in repository secrets and is only ever
+# read by this job — it is never in the repo, a laptop, or a chat transcript.
+name: Deploy to Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      with_database:
+        description: "Provision/attach Postgres (off = SQLite, resets on deploy)"
+        type: boolean
+        default: true
+      plan:
+        description: "Render web service plan"
+        default: starter
+      region:
+        description: "Render region"
+        default: oregon
+  push:
+    branches: [main]
+    # Only when something that changes what runs in the container changes.
+    paths:
+      - "chaos/**"
+      - "Dockerfile"
+      - "requirements.txt"
+      - ".github/workflows/deploy-render.yml"
+      - "tools/render_deploy.py"
+
+concurrency:
+  group: render-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Without the key the job would fail on every push for anyone who forked or
+    # hasn't set it up; skipping says so quietly instead.
+    if: github.event_name == 'workflow_dispatch' || vars.RENDER_ENABLED == '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Create or update the service, then deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_OWNER: ${{ vars.RENDER_OWNER }}
+          RENDER_REPO: ${{ github.server_url }}/${{ github.repository }}
+          RENDER_BRANCH: ${{ github.ref_name }}
+          RENDER_WITH_DATABASE: ${{ inputs.with_database == false && '0' || '1' }}
+          RENDER_PLAN: ${{ inputs.plan || 'starter' }}
+          RENDER_REGION: ${{ inputs.region || 'oregon' }}
+        run: python3 tools/render_deploy.py

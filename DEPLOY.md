@@ -21,6 +21,30 @@ it then runs on SQLite, which on a free instance means **the data resets on
 every deploy and the service sleeps when idle** (about a minute to wake). Fine
 for a demo, not for real mail.
 
+## Render from GitHub Actions (what to do if you'd rather not click)
+
+`.github/workflows/deploy-render.yml` does the same thing with an API key, so
+deploys can be re-run without touching a dashboard.
+
+1. Render → **Account Settings → API Keys** → create one.
+2. GitHub → this repo → **Settings → Secrets and variables → Actions** →
+   **New repository secret** named `RENDER_API_KEY`. Paste it there and
+   nowhere else: a key in a chat log or a commit is a key you have to rotate.
+3. **Actions → Deploy to Render → Run workflow.**
+
+The job creates the Postgres instance and the web service if they don't exist,
+generates `CHAOS_SECRET_KEY` and `CHAOS_SIGNUP_CODE` on the first run only,
+deploys, waits for the service to go live, and prints the URL. Re-running it
+deploys the current `main` against the same service — it never regenerates the
+secrets, because a new encryption key would make every stored mailbox
+credential unreadable.
+
+To have every push to `main` deploy as well, add a repository **variable**
+`RENDER_ENABLED=1`. If your Render account has more than one owner (a team as
+well as your personal account), add `RENDER_OWNER` with the one you want —
+the job refuses to guess rather than deploying a dealership's data into the
+wrong account.
+
 ## Railway
 
 Railway reads the `Procfile` with no extra configuration: **New Project** →
