@@ -151,13 +151,22 @@ function showWhoIsPlaying() {
 
   for (const starter of STARTERS) {
     const preview = blankCharacter({ ...starter, face: null });
+    const sub = h('div', { class: 'roster-sub' }, '\u{1F4F7} take a photo');
     grid.append(h('button', {
       class: 'roster-card',
       onclick: () => pickStarter(starter)
     },
       h('div', { class: 'roster-art', html: renderGoof(preview, { mood: 'idle' }) }),
       h('div', { class: 'roster-name' }, starter.name),
-      h('div', { class: 'roster-sub' }, starter.face ? '\u{1F4F8} photo ready' : '\u{1F4F7} take a photo')));
+      sub));
+
+    // No photos ship with the game, so the label cannot be read off the
+    // starter — a face path is only a promise until the file actually loads.
+    // Asking for it now also warms the cache, so picking a starter that does
+    // have a photo is instant.
+    loadStarterFace(starter).then((face) => {
+      if (face && sub.isConnected) sub.textContent = '\u{1F4F8} photo ready';
+    });
   }
 
   grid.append(h('button', { class: 'roster-card is-new', onclick: newCharacter },

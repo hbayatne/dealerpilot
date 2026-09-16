@@ -1,3 +1,9 @@
 node_modules/
 .cert/
 .DS_Store
+
+# The kids' faces stay on the family's own machines. Drop crops in here named
+# to match the `face` fields in public/js/starters.js (waleed.jpg, tamer.jpg,
+# ameen.jpg) and the first screen will offer them with their photos already on.
+# Without them the game still works — it asks each kid to take a photo instead.
+public/faces/

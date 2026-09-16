@@ -42,8 +42,12 @@ as one-tap characters, each with their face already on. Everything about a
 starter is editable afterwards, photo included, and "Somebody else" builds one
 from scratch.
 
-To change who the starters are, edit `public/js/starters.js` and drop matching
-crops into `public/faces/`.
+No photos ship with the game, so the first run asks each kid to take one. To
+have a starter arrive with their face already on, drop a square crop into
+`public/faces/` named to match its `face` field in `public/js/starters.js`
+(`waleed.jpg`, `tamer.jpg`, `ameen.jpg`). That folder is git-ignored, so
+anything you put there stays on your own machine. To change who the starters
+are, edit `public/js/starters.js`.
 
 ## Playing together
 
@@ -89,12 +93,11 @@ voices.
 
 ## Where the kids' photos go
 
-Three cropped photos ship with the game, in `public/faces/`, so the boys can
-start playing without doing anything. Those three are committed to this
-repository. Delete the files and blank the `face` fields in
-`public/js/starters.js` if you would rather they weren't.
+No photos are committed to this repository, and `public/faces/` is git-ignored
+so none can be added by accident. Put crops there yourself if you want the
+starters to arrive with their faces on; they stay on that machine.
 
-Every other photo — anything taken in the Face Booth — is cropped in the
+Every photo — anything taken in the Face Booth — is cropped in the
 browser and kept in that device's own local storage. It is never uploaded,
 never written to disk on the server, and never leaves your wifi. When a kid
 joins a party their character (including the face) is passed to the other
@@ -111,7 +114,7 @@ server/
   make-cert.js   self-signed certificate for the microphone
 public/
   index.html
-  faces/         the three cropped starter photos
+  faces/         git-ignored; optional starter photos you add yourself
   css/style.css
   js/
     main.js        screen router: title, who's playing, home, roster, party
