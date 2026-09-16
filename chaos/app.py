@@ -46,6 +46,8 @@ class Creds(BaseModel):
     email: str
     password: str
     name: Optional[str] = None
+    # Only consulted on sign-up, and only when CHAOS_SIGNUP_CODE is set.
+    code: Optional[str] = None
 
 
 class OrgIn(BaseModel):
@@ -166,6 +168,7 @@ def _need(ctx, minimum):
 def health():
     return {"ok": True, "brand": BRAND.public(), "ai": ai.status(),
             "secrets": crypto.status(),
+            "signup_code_required": auth.signup_code_required(),
             "database": "postgres" if db.IS_PG else "sqlite"}
 
 
@@ -209,7 +212,7 @@ def shared_scan(token: str):
 @app.post("/api/signup")
 def signup(body: Creds, response: Response, request: Request):
     guard(request, "signup")
-    token, uid, err = auth.signup(body.email, body.password, body.name)
+    token, uid, err = auth.signup(body.email, body.password, body.name, body.code)
     if err:
         raise HTTPException(400, err)
     _set_cookie(response, token)

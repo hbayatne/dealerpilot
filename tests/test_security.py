@@ -117,6 +117,61 @@ class RateLimiting(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class InviteOnlySignup(unittest.TestCase):
+    """A deployed instance is reachable by anyone who finds the URL, and it
+    holds a business's customer correspondence. With CHAOS_SIGNUP_CODE set,
+    sign-up is an invite; without it (local development) it stays open."""
+
+    def setUp(self):
+        ratelimit.reset()
+        self.c = TestClient(app)
+
+    def tearDown(self):
+        os.environ.pop("CHAOS_SIGNUP_CODE", None)
+
+    def _signup(self, email, **extra):
+        return self.c.post("/api/signup",
+                           json=dict(email=email, password="password123", **extra))
+
+    def test_open_when_no_code_is_configured(self):
+        self.assertFalse(auth.signup_code_required())
+        self.assertEqual(self._signup("open@invite.test").status_code, 200)
+
+    def test_wrong_or_missing_code_is_refused(self):
+        os.environ["CHAOS_SIGNUP_CODE"] = "let-me-in"
+        self.assertTrue(auth.signup_code_required())
+        for attempt in ({}, {"code": ""}, {"code": "guess"}, {"code": "LET-ME-IN"}):
+            r = self._signup("nope@invite.test", **attempt)
+            self.assertEqual(r.status_code, 400, f"{attempt} got in")
+        self.assertIsNone(db.get_user_by_email("nope@invite.test"))
+
+    def test_pasted_whitespace_is_forgiven(self):
+        """An invite code arrives by text message and gets pasted with a space
+        on the end. Trimming the submission is kindness, not a weaker check —
+        the secret itself is unchanged."""
+        os.environ["CHAOS_SIGNUP_CODE"] = "let-me-in"
+        self.assertEqual(self._signup("space@invite.test", code=" let-me-in ").status_code,
+                         200)
+
+    def test_right_code_gets_in(self):
+        os.environ["CHAOS_SIGNUP_CODE"] = "let-me-in"
+        self.assertEqual(self._signup("yes@invite.test", code="let-me-in").status_code, 200)
+
+    def test_login_is_unaffected(self):
+        """The gate is on the door, not on people already inside — otherwise
+        setting a code would lock out every existing account."""
+        self._signup("already@invite.test")
+        os.environ["CHAOS_SIGNUP_CODE"] = "let-me-in"
+        ratelimit.reset()
+        r = TestClient(app).post("/api/login", json={"email": "already@invite.test",
+                                                    "password": "password123"})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_the_form_is_told_a_code_is_needed(self):
+        os.environ["CHAOS_SIGNUP_CODE"] = "let-me-in"
+        self.assertTrue(self.c.get("/api/health").json()["signup_code_required"])
+
+
 class Secrets(unittest.TestCase):
     def test_credentials_round_trip_and_are_not_plaintext(self):
         blob = crypto.encrypt("app-password-123")
